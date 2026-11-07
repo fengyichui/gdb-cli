@@ -1,10 +1,13 @@
 """Tests for the J-Link GDB Server process manager and CLI command group."""
 
+import importlib
 import json
 import signal
+import sys
 import time
 import types
-from unittest.mock import Mock
+import unittest
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -293,3 +296,200 @@ def test_enumerate_usb_devices_parses_sample_output(monkeypatch):
     assert args[0] == "JLinkExe"
     assert run.call_args.kwargs["input"] == "ShowEmuList\n"
 
+
+# ---------------------------------------------------------------------------
+# Task 2: CLI command group tests (FakeClick pattern from test_cli_async)
+# ---------------------------------------------------------------------------
+
+class _FakeContext:
+    def __init__(self, invoked_subcommand=None):
+        self.invoked_subcommand = invoked_subcommand
+        self.help_text = "jlink help"
+        self.invoked = []
+
+    def invoke(self, command, **kwargs):
+        self.invoked.append((command, kwargs))
+        return command(**kwargs)
+
+    def get_help(self):
+        return self.help_text
+
+
+class _FakeGroup:
+    def __init__(self, func):
+        self.func = func
+
+    def __call__(self, *args, **kwargs):
+        return self.func(*args, **kwargs)
+
+    def command(self, *args, **kwargs):
+        def decorator(func):
+            return func
+        return decorator
+
+    def group(self, *args, **kwargs):
+        def decorator(func):
+            return _FakeGroup(func)
+        return decorator
+
+
+class _FakeClick(types.SimpleNamespace):
+    _context = None
+
+    class ClickException(Exception):
+        pass
+
+    class exceptions:
+        class Exit(Exception):
+            def __init__(self, code=0):
+                super().__init__(code)
+                self.exit_code = code
+
+    @staticmethod
+    def group(*args, **kwargs):
+        def decorator(func):
+            return _FakeGroup(func)
+        return decorator
+
+    @staticmethod
+    def get_current_context():
+        return _FakeClick._context
+
+    @staticmethod
+    def version_option(*args, **kwargs):
+        def decorator(func):
+            return func
+        return decorator
+
+    @staticmethod
+    def option(*args, **kwargs):
+        def decorator(func):
+            return func
+        return decorator
+
+    @staticmethod
+    def argument(*args, **kwargs):
+        def decorator(func):
+            return func
+        return decorator
+
+    @staticmethod
+    def Choice(values):
+        return values
+
+    @staticmethod
+    def echo(*args, **kwargs):
+        return None
+
+
+class TestJLinkCLI(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        saved_click = sys.modules.get("click")
+        sys.modules["click"] = _FakeClick()
+        try:
+            sys.modules.pop("gdb_cli.cli", None)
+            cls.cli = importlib.import_module("gdb_cli.cli")
+        finally:
+            if saved_click is not None:
+                sys.modules["click"] = saved_click
+            else:
+                sys.modules.pop("click", None)
+
+    def _instance(self):
+        return types.SimpleNamespace(
+            instance_id="abcd1234",
+            port=2331,
+            device="D",
+            select="usb=1",
+        )
+
+    def _call_jlink(self, **overrides):
+        values = {
+            "device": "D",
+            "select": "usb=1",
+            "binary": None,
+            "gdb_path": "gdb",
+            "jlink_path": "JLinkGDBServer",
+            "speed": None,
+            "interface": "SWD",
+            "port": 2331,
+            "allow_write": False,
+            "allow_call": False,
+            "timeout": 600,
+            "extra_args": (),
+        }
+        values.update(overrides)
+        return self.cli.jlink(**values)
+
+    def test_default_subcommand_invokes_start(self):
+        ctx = _FakeContext(invoked_subcommand=None)
+        _FakeClick._context = ctx
+        fake_process = types.SimpleNamespace(
+            session=types.SimpleNamespace(session_id="sess1234")
+        )
+
+        with patch.object(self.cli, "start_gdbserver", return_value=self._instance()) as mock_start, \
+             patch.object(self.cli, "launch_target", return_value=fake_process) as mock_launch, \
+             patch.object(self.cli, "print_json") as mock_print:
+            self._call_jlink()
+
+        assert len(ctx.invoked) == 1
+        mock_start.assert_called_once()
+        launch_kwargs = mock_launch.call_args.kwargs
+        assert launch_kwargs["remote"] == "127.0.0.1:2331"
+        payload = mock_print.call_args.args[0]
+        assert payload["status"] == "started"
+        assert payload["jlink_id"] == "abcd1234"
+        assert payload["session_id"] == "sess1234"
+
+    def test_usb_without_selector_errors_and_mentions_devices(self):
+        ctx = _FakeContext(invoked_subcommand=None)
+        _FakeClick._context = ctx
+
+        with patch.object(self.cli, "start_gdbserver") as mock_start, \
+             patch.object(self.cli, "print_error") as mock_error:
+            with pytest.raises(self.cli.click.exceptions.Exit) as excinfo:
+                self._call_jlink(select="usb")
+
+        assert excinfo.value.exit_code == 1
+        mock_start.assert_not_called()
+        assert "gdb-cli jlink devices" in mock_error.call_args.args[0]
+
+    def test_explicit_busy_port_errors(self):
+        ctx = _FakeContext(invoked_subcommand=None)
+        _FakeClick._context = ctx
+
+        with patch.object(self.cli, "start_gdbserver") as mock_start, \
+             patch.object(self.cli, "print_error") as mock_error:
+            mock_start.side_effect = self.cli.JLinkManagerError("Port 2331 is already in use")
+            with pytest.raises(self.cli.click.exceptions.Exit) as excinfo:
+                self._call_jlink()
+
+        assert excinfo.value.exit_code == 1
+        mock_error.assert_called_once()
+
+    def test_launch_target_failure_stops_gdbserver_and_exits(self):
+        ctx = _FakeContext(invoked_subcommand=None)
+        _FakeClick._context = ctx
+
+        with patch.object(self.cli, "start_gdbserver", return_value=self._instance()), \
+             patch.object(self.cli, "launch_target",
+                          side_effect=self.cli.GDBLauncherError("boom")), \
+             patch.object(self.cli, "stop_instance") as mock_stop, \
+             patch.object(self.cli, "print_error") as mock_error:
+            with pytest.raises(self.cli.click.exceptions.Exit) as excinfo:
+                self._call_jlink()
+
+        assert excinfo.value.exit_code == 1
+        mock_stop.assert_called_once_with("abcd1234")
+        mock_error.assert_called_once()
+
+    def test_subcommand_present_does_not_default_to_start(self):
+        ctx = _FakeContext(invoked_subcommand="status")
+        _FakeClick._context = ctx
+
+        with patch.object(self.cli, "jlink_start") as mock_start:
+            self._call_jlink()
+
+        mock_start.assert_not_called()

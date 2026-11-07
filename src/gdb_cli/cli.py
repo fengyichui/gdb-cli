@@ -16,6 +16,7 @@ import json
 import os
 import re
 import time
+import uuid
 from typing import Optional
 
 import click
@@ -23,8 +24,22 @@ import click
 from . import __version__
 from .client import GDBClient, GDBClientError, GDBCommandError
 from .i18n import t
+from .jlink import (
+    JLINK_DIR,
+    JLinkManagerError,
+    build_gdbserver_cmdline,
+    enumerate_usb_devices,
+    find_free_port,
+    get_instance,
+    list_instances,
+    restart_instance,
+    start_gdbserver,
+    stop_instance,
+    validate_select,
+)
 from .launcher import GDBLauncherError, launch_attach, launch_core, launch_target
 from .session import (
+    _read_proc_starttime,
     cleanup_dead_sessions,
     find_session_by_core,
     find_session_by_pid,
@@ -754,6 +769,276 @@ def env_check(gdb_path) -> None:
     from .env_check import get_env_check_cli_output
     results = get_env_check_cli_output(gdb_path=gdb_path)
     print_json(results)
+
+
+def _jlink_start_options(func):
+    """Attach the options shared by ``jlink`` and ``jlink start``."""
+    func = click.option(
+        "--extra-arg", "extra_args", multiple=True,
+        help=t("cli.jlink.extra_arg_help")
+    )(func)
+    func = click.option("--timeout", default=600, help=t("cli.jlink.timeout_help"))(func)
+    func = click.option(
+        "--allow-call", is_flag=True, help=t("cli.jlink.allow_call_help")
+    )(func)
+    func = click.option(
+        "--allow-write", is_flag=True, help=t("cli.jlink.allow_write_help")
+    )(func)
+    func = click.option("--port", type=int, default=None, help=t("cli.jlink.port_help"))(func)
+    func = click.option(
+        "--if", "interface", default="SWD", help=t("cli.jlink.interface_help")
+    )(func)
+    func = click.option("--speed", default=None, help=t("cli.jlink.speed_help"))(func)
+    func = click.option(
+        "--jlink-path", default="JLinkGDBServer", help=t("cli.jlink.jlink_path_help")
+    )(func)
+    func = click.option(
+        "--gdb-path", default="gdb", help=t("cli.jlink.gdb_path_help")
+    )(func)
+    func = click.option(
+        "--binary", "-b", default=None, help=t("cli.jlink.binary_help")
+    )(func)
+    func = click.option("--select", default=None, help=t("cli.jlink.select_help"))(func)
+    func = click.option(
+        "--device", "-d", default=None, help=t("cli.jlink.device_help")
+    )(func)
+    return func
+
+
+def _resolve_instance_id(instance_id: Optional[str]) -> str:
+    """Return the requested id, or the only running one when unambiguous."""
+    if instance_id:
+        return instance_id
+
+    instances = list_instances()
+    if not instances:
+        raise JLinkManagerError(t("cli.jlink.no_instances"))
+    if len(instances) > 1:
+        ids = ", ".join(instance.instance_id for instance in instances)
+        raise JLinkManagerError(
+            t("cli.jlink.ambiguous_instance", instances=ids)
+        )
+    return instances[0].instance_id
+
+
+@main.group(invoke_without_command=True, help=t("cli.jlink.doc"))
+@_jlink_start_options
+def jlink(
+    device: Optional[str],
+    select: Optional[str],
+    binary: Optional[str],
+    gdb_path: str,
+    jlink_path: str,
+    speed: Optional[str],
+    interface: str,
+    port: Optional[int],
+    allow_write: bool,
+    allow_call: bool,
+    timeout: int,
+    extra_args,
+) -> None:
+    """Manage JLinkGDBServer and automatically start a GDB session"""
+    ctx = click.get_current_context()
+    if ctx.invoked_subcommand is not None:
+        return
+
+    if device is None:
+        click.echo(ctx.get_help())
+        return
+
+    # ``gdb-cli jlink -d DEV --select ...`` defaults to the ``start`` command.
+    ctx.invoke(
+        jlink_start,
+        device=device,
+        select=select,
+        binary=binary,
+        gdb_path=gdb_path,
+        jlink_path=jlink_path,
+        speed=speed,
+        interface=interface,
+        port=port,
+        allow_write=allow_write,
+        allow_call=allow_call,
+        timeout=timeout,
+        extra_args=extra_args,
+    )
+
+
+@jlink.command("start", help=t("cli.jlink.start.doc"))
+@_jlink_start_options
+def jlink_start(
+    device: Optional[str],
+    select: Optional[str],
+    binary: Optional[str],
+    gdb_path: str,
+    jlink_path: str,
+    speed: Optional[str],
+    interface: str,
+    port: Optional[int],
+    allow_write: bool,
+    allow_call: bool,
+    timeout: int,
+    extra_args,
+) -> None:
+    """Start JLinkGDBServer and connect GDB"""
+    try:
+        if not device:
+            raise JLinkManagerError(t("cli.jlink.device_required"))
+        validate_select(select or "")
+    except JLinkManagerError as e:
+        print_error(str(e))
+        raise click.exceptions.Exit(1)
+
+    if port is None:
+        port = find_free_port()
+
+    cmdline = build_gdbserver_cmdline(
+        device=device,
+        select=select or "",
+        port=port,
+        speed=speed,
+        interface=interface,
+        extra_args=list(extra_args or ()),
+        jlink_exe=jlink_path,
+    )
+
+    jlink_id = uuid.uuid4().hex[:8]
+    log_path = str(JLINK_DIR / f"{jlink_id}.log")
+
+    try:
+        instance = start_gdbserver(cmdline, log_path, instance_id=jlink_id)
+    except JLinkManagerError as e:
+        print_error(t("cli.jlink.start_failed"), str(e))
+        raise click.exceptions.Exit(1)
+
+    try:
+        gdb_process = launch_target(
+            remote=f"127.0.0.1:{instance.port}",
+            binary=binary,
+            timeout=timeout,
+            allow_write=allow_write,
+            allow_call=allow_call,
+            gdb_path=gdb_path,
+        )
+    except GDBLauncherError as e:
+        # Do not leave an orphan GDBServer behind when GDB cannot attach.
+        stop_instance(instance.instance_id)
+        print_error(t("cli.jlink.connect_failed"), str(e))
+        raise click.exceptions.Exit(1)
+    except Exception as e:
+        stop_instance(instance.instance_id)
+        print_error(t("cli.jlink.connect_failed"), str(e))
+        raise click.exceptions.Exit(1)
+
+    print_json({
+        "jlink_id": instance.instance_id,
+        "port": instance.port,
+        "device": instance.device,
+        "select": instance.select,
+        "session_id": gdb_process.session.session_id,
+        "status": "started",
+    })
+
+
+@jlink.command("stop", help=t("cli.jlink.stop.doc"))
+@click.option("--jlink-id", "-s", default=None, help=t("cli.jlink.jlink_id_help"))
+@click.option("--all", "all_instances", is_flag=True, help=t("cli.jlink.all_help"))
+def jlink_stop(jlink_id: Optional[str], all_instances: bool) -> None:
+    """Stop JLinkGDBServer instance(s)"""
+    try:
+        if all_instances:
+            instances = list_instances()
+            if not instances:
+                raise JLinkManagerError(t("cli.jlink.no_instances"))
+            results = [stop_instance(instance.instance_id) for instance in instances]
+            print_json({
+                "stopped": results,
+                "count": len(results),
+                "status": "stopped",
+            })
+            return
+
+        resolved = _resolve_instance_id(jlink_id)
+        result = stop_instance(resolved)
+        result["status"] = "stopped"
+        print_json(result)
+    except JLinkManagerError as e:
+        print_error(t("cli.jlink.stop_failed"), str(e))
+        raise click.exceptions.Exit(1)
+
+
+@jlink.command("restart", help=t("cli.jlink.restart.doc"))
+@click.option("--jlink-id", "-s", default=None, help=t("cli.jlink.jlink_id_help"))
+def jlink_restart(jlink_id: Optional[str]) -> None:
+    """Restart a JLinkGDBServer instance"""
+    try:
+        resolved = _resolve_instance_id(jlink_id)
+        instance = restart_instance(resolved)
+    except JLinkManagerError as e:
+        print_error(t("cli.jlink.restart_failed"), str(e))
+        raise click.exceptions.Exit(1)
+
+    print_json({
+        "jlink_id": instance.instance_id,
+        "port": instance.port,
+        "device": instance.device,
+        "select": instance.select,
+        "status": "restarted",
+    })
+
+
+@jlink.command("status", help=t("cli.jlink.status.doc"))
+@click.option("--jlink-id", "-s", default=None, help=t("cli.jlink.jlink_id_help"))
+def jlink_status(jlink_id: Optional[str]) -> None:
+    """Show JLinkGDBServer instance status"""
+    try:
+        if jlink_id:
+            instance = get_instance(jlink_id)
+            if instance is None:
+                raise JLinkManagerError(
+                    t("cli.jlink.no_instance", instance_id=jlink_id)
+                )
+            instances = [instance]
+        else:
+            instances = list_instances()
+    except JLinkManagerError as e:
+        print_error(str(e))
+        raise click.exceptions.Exit(1)
+
+    entries = []
+    for instance in instances:
+        current_start_time = (
+            _read_proc_starttime(instance.pid) if instance.pid else None
+        )
+        running = (
+            current_start_time is not None
+            and instance.start_time is not None
+            and current_start_time == instance.start_time
+        )
+        entries.append({
+            "jlink_id": instance.instance_id,
+            "port": instance.port,
+            "device": instance.device,
+            "select": instance.select,
+            "pid": instance.pid,
+            "log_path": instance.log_path,
+            "started_at": instance.started_at,
+            "running": running,
+        })
+
+    print_json({"instances": entries, "count": len(entries)})
+
+
+@jlink.command("devices", help=t("cli.jlink.devices.doc"))
+def jlink_devices() -> None:
+    """List attached J-Link probes"""
+    try:
+        devices = enumerate_usb_devices()
+    except JLinkManagerError as e:
+        print_error(str(e))
+        raise click.exceptions.Exit(1)
+
+    print_json({"devices": devices, "count": len(devices)})
 
 
 if __name__ == "__main__":

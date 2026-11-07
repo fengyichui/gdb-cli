@@ -20,6 +20,11 @@ class _FakeGroup:
             return func
         return decorator
 
+    def group(self, *args, **kwargs):
+        def decorator(func):
+            return _FakeGroup(func)
+        return decorator
+
 
 class _FakeClick(types.SimpleNamespace):
     class ClickException(Exception):
