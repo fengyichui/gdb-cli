@@ -65,6 +65,10 @@ ZH_CN_CATALOG = {
     # === stop command ===
     "cli.stop.doc": "停止会话，安全退出 GDB",
     "cli.stop.session_help": "会话 ID",
+    "cli.stop.before_detach_help": (
+        "detach 前执行的 GDB 命令，可多行分隔"
+        "（例如 'monitor go' 让目标继续运行）"
+    ),
 
     # === sessions command ===
     "cli.sessions.doc": "列出所有活跃会话",

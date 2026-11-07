@@ -6,7 +6,6 @@ Command Handlers - GDB 命令处理器
 """
 
 import os
-import queue
 from pathlib import Path
 from typing import Any, List, Optional, Tuple
 
@@ -21,7 +20,15 @@ except ImportError:
 # 动态加载 value_formatter（避免相对导入问题）
 import importlib.util
 
-_server_dir = os.environ.get("GDB_CLI_SERVER_DIR", str(Path(__file__).parent))
+_server_dir = os.environ.get("GDB_CLI_SERVER_DIR")
+if not _server_dir:
+    _module_file = globals().get("__file__")
+    if not _module_file:
+        raise RuntimeError(
+            "Cannot locate gdb_server directory: "
+            "GDB_CLI_SERVER_DIR is not set and __file__ is unavailable"
+        )
+    _server_dir = str(Path(_module_file).resolve().parent)
 _value_formatter_path = Path(_server_dir) / "value_formatter.py"
 _spec = importlib.util.spec_from_file_location("value_formatter", _value_formatter_path)
 if _spec is None or _spec.loader is None:
@@ -601,33 +608,11 @@ def handle_exec(
             return {"error": reason or "Command not allowed", "command": command}
 
     try:
-
-        # The command must run in the main thread, not in the thread that
-        # receives from the socket.  Create a function which will execute
-        # the command and pass the output through a queue.  This definition
-        # uses lexical scoping for the command and the queue.
-        result_queue = queue.Queue()
-
-        def run_command():
-            try:
-                output = gdb.execute(command, to_string=True)
-                result_queue.put(("ok", output))
-            except Exception as e:
-                result_queue.put(("error", str(e)))
-
-        # Pass the function through post_event() to the main thread,
-        # where it will run, and this thread waits to receive the output
-        # from the queue.
-        gdb.post_event(run_command)
-
-        try:
-            output_status, output = result_queue.get(timeout=60.0)
-        except queue.Empty:
-            return {"command": command, "error": "Command timeout after 60s"}
-
-        if output_status == "error":
-            return {"command": command, "error": output}
-
+        # Handlers are already dispatched on the GDB main thread by
+        # GDBRPCServer._dispatch() via gdb.post_event().  Posting a nested
+        # event here would deadlock: the main thread is busy running this
+        # handler, so the nested event can never be processed.
+        output = gdb.execute(command, to_string=True)
         return {
             "command": command,
             "output": output or "(no output)"
@@ -930,6 +915,35 @@ def handle_args(
         return {"error": str(e)}
 
 
+# 常用寄存器（按目标架构）。嵌入式目标（ARM/AArch64）与原生 x86_64 的
+# 寄存器名完全不同，必须根据当前 frame 的架构选择默认列表。
+_X86_DEFAULT_REGS = [
+    "rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "rsp", "rip",
+    "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15", "eflags"
+]
+_ARM_DEFAULT_REGS = [
+    "r0", "r1", "r2", "r3", "r4", "r5", "r6", "r7", "r8", "r9", "r10",
+    "r11", "r12", "sp", "lr", "pc", "xpsr", "cpsr"
+]
+_AARCH64_DEFAULT_REGS = (
+    [f"x{i}" for i in range(31)] + ["sp", "pc", "cpsr"]
+)
+
+
+def _default_register_names(selected_frame: 'gdb.Frame') -> List[str]:
+    """Return a curated default register list for the frame's architecture."""
+    try:
+        arch_name = selected_frame.architecture().name().lower()
+    except Exception:
+        arch_name = ""
+
+    if arch_name == "arm":
+        return _ARM_DEFAULT_REGS
+    if arch_name == "aarch64":
+        return _AARCH64_DEFAULT_REGS
+    return _X86_DEFAULT_REGS
+
+
 def handle_registers(
     names: Optional[str] = None,
     thread_id: Optional[int] = None,
@@ -949,12 +963,6 @@ def handle_registers(
     """
     if not GDB_AVAILABLE:
         return {"error": "GDB not available"}
-
-    # 常用 x86_64 寄存器
-    DEFAULT_REGS = [
-        "rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "rsp", "rip",
-        "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15", "eflags"
-    ]
 
     try:
         orig_thread = gdb.selected_thread()
@@ -976,10 +984,12 @@ def handle_registers(
         selected = _select_frame_by_number(frame)
 
         # 确定要读取的寄存器列表
-        if names:
+        # 默认列表按目标架构生成；显式指定的寄存器即使读取失败也保留错误信息。
+        explicit_names = bool(names)
+        if explicit_names:
             reg_names = [n.strip() for n in names.split(",")]
         else:
-            reg_names = DEFAULT_REGS
+            reg_names = _default_register_names(selected)
 
         regs_data = []
         for name in reg_names:
@@ -991,7 +1001,8 @@ def handle_registers(
                     "decimal": int(val)
                 })
             except Exception as e:
-                regs_data.append({"name": name, "error": str(e)})
+                if explicit_names:
+                    regs_data.append({"name": name, "error": str(e)})
 
         # 恢复
         try:

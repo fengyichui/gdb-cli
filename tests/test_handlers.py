@@ -238,6 +238,64 @@ class TestHandleThreads(unittest.TestCase):
         self.assertGreaterEqual(len(result["threads"]), 1)
 
 
+class TestHandleExecThreading(unittest.TestCase):
+    """handle_exec must not post a nested event (it already runs on the GDB main thread)."""
+
+    def setUp(self):
+        import importlib
+
+        import gdb_cli.gdb_server.handlers as handlers_mod
+        importlib.reload(handlers_mod)
+        self.handlers = handlers_mod
+        self.gdb = sys.modules['gdb']
+        self.gdb.execute = Mock(return_value="ok")
+
+    def test_exec_does_not_post_nested_event(self):
+        self.gdb.post_event = Mock()
+
+        result = self.handlers.handle_exec("info registers", safety_level="readonly")
+
+        self.gdb.post_event.assert_not_called()
+        self.assertEqual(result["output"], "ok")
+
+
+class TestDefaultRegisterNames(unittest.TestCase):
+    """Default register list must follow the target architecture."""
+
+    def setUp(self):
+        import importlib
+
+        import gdb_cli.gdb_server.handlers as handlers_mod
+        importlib.reload(handlers_mod)
+        self.handlers = handlers_mod
+
+    @staticmethod
+    def _frame_with_arch(name):
+        frame = Mock()
+        frame.architecture.return_value.name.return_value = name
+        return frame
+
+    def test_arm_registers(self):
+        names = self.handlers._default_register_names(self._frame_with_arch("arm"))
+        self.assertIn("r0", names)
+        self.assertIn("pc", names)
+        self.assertIn("xpsr", names)
+        self.assertNotIn("rax", names)
+
+    def test_aarch64_registers(self):
+        names = self.handlers._default_register_names(self._frame_with_arch("aarch64"))
+        self.assertIn("x0", names)
+        self.assertIn("pc", names)
+        self.assertNotIn("rax", names)
+
+    def test_x86_registers(self):
+        names = self.handlers._default_register_names(
+            self._frame_with_arch("i386:x86-64")
+        )
+        self.assertIn("rax", names)
+        self.assertIn("rip", names)
+
+
 class TestHandleStatus(unittest.TestCase):
     """Test session status handler."""
 

@@ -103,21 +103,26 @@ def launch_core(
     ]
 
     # sysroot / solib-prefix
+    # NOTE: `set` takes the rest of the line literally; single quotes would
+    # become part of the value. See _quote_gdb_filename() for the commands
+    # that do strip quotes.
     if sysroot:
-        gdb_commands.append(f"set sysroot {_escape_gdb_arg(sysroot)}")
+        gdb_commands.append(f"set sysroot {_gdb_rest_of_line(sysroot)}")
     if solib_prefix:
-        gdb_commands.append(f"set solib-absolute-prefix {_escape_gdb_arg(solib_prefix)}")
+        gdb_commands.append(
+            f"set solib-absolute-prefix {_gdb_rest_of_line(solib_prefix)}"
+        )
 
     # 源码目录
     if source_dir:
-        gdb_commands.append(f"directory {_escape_gdb_arg(source_dir)}")
+        gdb_commands.append(f"directory {_quote_gdb_filename(source_dir)}")
 
     # 启动 RPC Server
     gdb_commands.extend(_build_server_commands(session))
 
     # 加载 binary 和 core。Server 先启动，这样 load 可以异步返回。
-    gdb_commands.append(f"file {_escape_gdb_arg(binary)}")
-    gdb_commands.append(f"core-file {_escape_gdb_arg(core)}")
+    gdb_commands.append(f"file {_quote_gdb_filename(binary)}")
+    gdb_commands.append(f"core-file {_quote_gdb_filename(core)}")
     gdb_commands.append("python _gdb_rpc_server.set_ready()")
 
     # 构建 GDB 参数
@@ -192,7 +197,7 @@ def launch_attach(
 
     # 加载 binary (可选)
     if binary:
-        gdb_commands.append(f"file {_escape_gdb_arg(binary)}")
+        gdb_commands.append(f"file {_quote_gdb_filename(binary)}")
 
     # Attach
     gdb_commands.append(f"attach {pid}")
@@ -269,10 +274,11 @@ def launch_target(
 
     # 加载 binary (可选)
     if binary:
-        gdb_commands.append(f"file {_escape_gdb_arg(binary)}")
+        gdb_commands.append(f"file {_quote_gdb_filename(binary)}")
 
-    # Target
-    gdb_commands.append(f"target extended-remote {_escape_gdb_arg(remote)}")
+    # Target: `target` takes the rest of the line literally, so the address
+    # must NOT be quoted (GDB would resolve the quotes as part of the hostname).
+    gdb_commands.append(f"target extended-remote {_gdb_rest_of_line(remote)}")
 
     # scheduler-locking
     if scheduler_locking:
@@ -310,19 +316,17 @@ def _build_server_commands(session: SessionMeta) -> List[str]:
     # 序列化 session 元数据
     meta_json = json.dumps(session_meta)
 
-    # 需要转义 JSON 中的引号
-    meta_escaped = meta_json.replace('"', '\\"')
-
     return [
-        # 设置环境变量
-        f"python import os; os.environ['GDB_CLI_SOCK_PATH'] = {_escape_gdb_arg(str(session.sock_path))}",
-        f"python os.environ['GDB_CLI_SESSION_META'] = \"{meta_escaped}\"",
-        f"python os.environ['GDB_CLI_HEARTBEAT'] = '{session.heartbeat_timeout}'",
-        f"python os.environ['GDB_CLI_SERVER_DIR'] = {_escape_gdb_arg(str(GDB_SERVER_SCRIPT.parent))}",
+        # 设置环境变量 (python 代码里的字符串用 repr() 生成合法字面量)
+        f"python import os; os.environ['GDB_CLI_SOCK_PATH'] = {repr(str(session.sock_path))}",
+        f"python os.environ['GDB_CLI_SESSION_META'] = {repr(meta_json)}",
+        f"python os.environ['GDB_CLI_HEARTBEAT'] = {repr(str(session.heartbeat_timeout))}",
+        f"python os.environ['GDB_CLI_SERVER_DIR'] = {repr(str(GDB_SERVER_SCRIPT.parent))}",
         # 加载 Server 脚本 (source 会将定义加载到全局命名空间)
-        f"source {_escape_gdb_arg(str(GDB_SERVER_SCRIPT))}",
+        # `source` 取整行剩余内容作为文件名，不能加引号，否则引号会成为路径的一部分。
+        f"source {GDB_SERVER_SCRIPT}",
         # 启动 Server (直接调用全局命名空间中的 start_server)
-        f"python start_server({_escape_gdb_arg(str(session.sock_path))}, {session_meta}, {session.heartbeat_timeout})",
+        f"python start_server({repr(str(session.sock_path))}, {session_meta}, {session.heartbeat_timeout})",
     ]
 
 
@@ -335,10 +339,24 @@ def _cleanup_fifo_if_exists(fifo_path):
             pass
 
 
-def _escape_gdb_arg(arg: str) -> str:
-    """将参数转义为 GDB 安全的单引号字符串"""
-    escaped = arg.replace("\\", "\\\\").replace("'", "\\'")
-    return f"'{escaped}'"
+def _quote_gdb_filename(arg: str) -> str:
+    """Quote a path for GDB commands that strip quotes (file/core-file/directory).
+
+    GDB's `file`, `core-file` and `directory` parse a filename argument and
+    strip surrounding quotes, so quoting is required for paths containing
+    spaces. Embedded single quotes are escaped shell-style.
+    """
+    return "'" + arg.replace("'", "'\\''") + "'"
+
+
+def _gdb_rest_of_line(arg: str) -> str:
+    """Return an argument for GDB commands that consume the rest of the line.
+
+    Commands such as `source`, `set sysroot` and `target extended-remote`
+    take everything after the command name literally. Quoting them would
+    become part of the value, so the argument is passed through unchanged.
+    """
+    return arg
 
 
 def _start_gdb_process(

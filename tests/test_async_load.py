@@ -126,5 +126,70 @@ class TestGDBRPCServerLoadingState(unittest.TestCase):
         self.assertIs(__main__._gdb_rpc_server, fake_server)
 
 
+class TestStopHandler(unittest.TestCase):
+    """Verify graceful stop: optional pre-detach commands, detach, shutdown."""
+
+    @classmethod
+    def setUpClass(cls):
+        import tempfile
+
+        cls.temp_dir = tempfile.mkdtemp()
+        os.environ["GDB_CLI_SERVER_DIR"] = str(
+            Path(__file__).resolve().parent.parent / "src" / "gdb_cli" / "gdb_server"
+        )
+
+        gdb_mock = sys.modules.get("gdb") or Mock()
+        gdb_mock.MemoryError = type("MemoryError", (Exception,), {})
+        gdb_mock.error = type("GDBError", (Exception,), {})
+        gdb_mock.events = Mock()
+        gdb_mock.events.new_objfile = Mock()
+        gdb_mock.events.new_objfile.connect = Mock()
+        gdb_mock.events.before_prompt = Mock()
+        gdb_mock.events.before_prompt.connect = Mock()
+        gdb_mock.write = Mock()
+        gdb_mock.post_event = lambda fn: fn()
+        sys.modules["gdb"] = gdb_mock
+
+    def setUp(self):
+        from gdb_cli.gdb_server.gdb_rpc_server import GDBRPCServer
+
+        self.gdb = sys.modules["gdb"]
+        self.gdb.execute = Mock()
+
+        self.server = GDBRPCServer(
+            sock_path=str(Path(self.temp_dir) / "stop.sock"),
+            session_meta={"session_id": "abc123", "mode": "target"},
+        )
+        self.server.set_ready()
+
+    def test_stop_runs_before_detach_and_detaches(self):
+        result = self.server._dispatch(
+            {"cmd": "stop", "before_detach": "monitor go\nmonitor reset"}
+        )
+
+        self.assertTrue(self.server._stop_requested)
+        self.assertTrue(result["detached"])
+        calls = [c.args[0] for c in self.gdb.execute.call_args_list]
+        self.assertEqual(calls, ["monitor go", "monitor reset", "detach"])
+
+    def test_stop_allowed_while_loading(self):
+        self.server._state = "loading"
+
+        result = self.server._dispatch({"cmd": "stop"})
+
+        self.assertTrue(self.server._stop_requested)
+        self.assertTrue(result["detached"])
+
+    def test_detach_without_inferior_is_not_an_error(self):
+        self.gdb.execute.side_effect = [
+            Exception("No inferior to detach"),
+        ]
+
+        result = self.server._dispatch({"cmd": "stop"})
+
+        self.assertFalse(result["detached"])
+        self.assertEqual(result["errors"], [])
+
+
 if __name__ == "__main__":
     unittest.main()

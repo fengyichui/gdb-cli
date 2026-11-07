@@ -13,7 +13,7 @@ import socket
 import threading
 import time
 from pathlib import Path
-from typing import Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 # GDB Python API - 仅在 GDB 环境中可用
 try:
@@ -73,6 +73,7 @@ class GDBRPCServer:
         self._loading_start = time.time()
         self.LOADING_TIMEOUT = 60.0
         self._loading_timer: Optional[threading.Timer] = None
+        self._stop_requested = False
 
         # 命令处理器注册表
         self._handlers: Dict[str, Callable] = {}
@@ -81,8 +82,18 @@ class GDBRPCServer:
     def _register_builtin_handlers(self) -> None:
         """注册内置命令处理器"""
         # 动态加载 handlers 模块（避免相对导入问题）
+        # NOTE: 不能依赖 __file__ —— GDB 的 source 只在执行脚本期间提供它，
+        # 之后调用本函数时全局命名空间里已经没有 __file__ 了。
         import importlib.util
-        server_dir = os.environ.get("GDB_CLI_SERVER_DIR", str(Path(__file__).parent))
+        server_dir = os.environ.get("GDB_CLI_SERVER_DIR")
+        if not server_dir:
+            module_file = globals().get("__file__")
+            if not module_file:
+                raise RuntimeError(
+                    "Cannot locate gdb_server directory: "
+                    "GDB_CLI_SERVER_DIR is not set and __file__ is unavailable"
+                )
+            server_dir = str(Path(module_file).resolve().parent)
         handlers_path = Path(server_dir) / "handlers.py"
         spec = importlib.util.spec_from_file_location("handlers", handlers_path)
         if spec is None or spec.loader is None:
@@ -114,11 +125,45 @@ class GDBRPCServer:
             "sharedlibs": handlers.handle_sharedlibs,
             "disasm": handlers.handle_disasm,
             "ping": self._handle_ping,
+            "stop": self._handle_stop,
         }
 
     def _handle_ping(self, **kwargs) -> dict:
         """心跳 ping 处理"""
         return {"pong": True, "time": time.time(), "state": self._state}
+
+    def _handle_stop(self, before_detach: Optional[str] = None, **kwargs) -> dict:
+        """Detach from the target and request a graceful GDB shutdown.
+
+        Runs on the GDB main thread.  The accept thread sends the response
+        first and only then calls _shutdown_after_stop(), so the client sees
+        a clean "stopped" status instead of a connection error.
+        """
+        result: Dict[str, Any] = {"detached": False, "errors": []}
+
+        # Optional user commands, e.g. "monitor go" to leave the MCU running
+        # or "monitor reset" to put the target into a known state.
+        if before_detach:
+            for line in str(before_detach).splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    gdb.execute(line, to_string=True)
+                except Exception as e:
+                    result["errors"].append(f"{line}: {e}")
+
+        try:
+            gdb.execute("detach", to_string=True)
+            result["detached"] = True
+        except Exception as e:
+            message = str(e)
+            # Core files and already-detached sessions have no inferior.
+            if "No inferior" not in message and "not being run" not in message:
+                result["errors"].append(message)
+
+        self._stop_requested = True
+        return result
 
     def _handle_loading_status(self) -> dict:
         """加载阶段的轻量状态查询，不访问 GDB API。"""
@@ -275,6 +320,52 @@ class GDBRPCServer:
             finally:
                 conn.close()
 
+            # The stop response has been sent: shut GDB down from this thread.
+            if self._stop_requested:
+                break
+
+        if self._stop_requested:
+            self._shutdown_after_stop()
+
+    def _shutdown_after_stop(self) -> None:
+        """Close the socket and quit GDB after a graceful stop.
+
+        Called from the accept thread once the response has been delivered.
+        GDB API calls must happen on the main thread, hence post_event().
+        """
+        self.running = False
+
+        for timer in (self.heartbeat_timer, self._loading_timer):
+            if timer:
+                timer.cancel()
+        self.heartbeat_timer = None
+        self._loading_timer = None
+
+        if self.server_sock:
+            try:
+                self.server_sock.close()
+            except Exception:
+                pass
+            self.server_sock = None
+
+        if self.sock_path.exists():
+            try:
+                self.sock_path.unlink()
+            except Exception:
+                pass
+
+        gdb.post_event(self._quit_gdb)
+
+    @staticmethod
+    def _quit_gdb() -> None:
+        """Run on the GDB main thread and exit the process."""
+        try:
+            gdb.execute("quit")
+        except Exception:
+            # `quit` may raise as part of GDB's shutdown path; make sure the
+            # process still terminates.
+            os._exit(0)
+
     def _dispatch(self, request: dict) -> dict:
         """
         主线程：根据 cmd 分发到具体 handler
@@ -299,7 +390,8 @@ class GDBRPCServer:
                 )
             if cmd == "status":
                 return self._handle_loading_status()
-            if cmd not in ("ping", "status"):
+            # `stop` must remain available so a stuck load can be aborted.
+            if cmd not in ("ping", "status", "stop"):
                 raise ValueError(f"Session is loading ({elapsed:.0f}s elapsed)")
 
         handler = self._handlers.get(cmd)

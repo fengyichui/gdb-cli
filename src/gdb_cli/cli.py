@@ -362,17 +362,25 @@ def exec_cmd(session: str, command: str) -> None:
 
 @main.command()
 @click.option("--session", "-s", required=True, help=t("cli.stop.session_help"))
-def stop(session: str) -> None:
+@click.option("--before-detach", help=t("cli.stop.before_detach_help"))
+def stop(session: str, before_detach: Optional[str]) -> None:
     """Stop session and safely exit GDB"""
     try:
-        # 发送停止命令
+        # 发送停止命令；Server 先 detach，再在响应返回后退出 GDB
         with get_client(session) as client:
-            client.call("stop")
+            result = client.call("stop", before_detach=before_detach or "")
 
-        print_json({
+        from .session import cleanup_session
+        cleanup_session(session)
+
+        output = {
             "session_id": session,
-            "status": "stopped"
-        })
+            "status": "stopped",
+            "detached": bool(result.get("detached")),
+        }
+        if result.get("errors"):
+            output["detach_errors"] = result["errors"]
+        print_json(output)
 
     except GDBClientError:
         # 强制清理

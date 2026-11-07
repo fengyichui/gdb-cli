@@ -105,6 +105,31 @@ class TestCLIAsyncBehavior(unittest.TestCase):
         self.assertEqual(payload["state"], "loading")
         self.assertEqual(payload["session_id"], "abc12345")
 
+    def test_stop_reports_graceful_detach(self):
+        fake_client = Mock()
+        fake_client.__enter__ = Mock(return_value=fake_client)
+        fake_client.__exit__ = Mock(return_value=False)
+        fake_client.call.return_value = {"detached": True, "errors": []}
+
+        with patch.object(self.cli, "get_client", return_value=fake_client), \
+             patch("gdb_cli.session.cleanup_session", return_value=True), \
+             patch.object(self.cli, "print_json") as mock_print_json:
+            self.cli.stop("abc12345", "monitor go")
+
+        fake_client.call.assert_called_once_with("stop", before_detach="monitor go")
+        payload = mock_print_json.call_args.args[0]
+        self.assertEqual(payload["status"], "stopped")
+        self.assertTrue(payload["detached"])
+
+    def test_stop_falls_back_to_force_cleanup(self):
+        with patch.object(self.cli, "get_client", side_effect=self.cli.GDBClientError("dead")), \
+             patch("gdb_cli.session.cleanup_session", return_value=True), \
+             patch.object(self.cli, "print_json") as mock_print_json:
+            self.cli.stop("abc12345", None)
+
+        payload = mock_print_json.call_args.args[0]
+        self.assertEqual(payload["status"], "force_stopped")
+
     def test_status_errors_when_session_dead(self):
         meta = types.SimpleNamespace(gdb_pid=12345)
 

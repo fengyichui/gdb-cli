@@ -65,6 +65,10 @@ RU_CATALOG = {
     # === stop command ===
     "cli.stop.doc": "Остановить сессию и безопасно выйти из GDB",
     "cli.stop.session_help": "ID сессии",
+    "cli.stop.before_detach_help": (
+        "Команды GDB, выполняемые перед detach, по одной на строку "
+        "(например, 'monitor go', чтобы оставить цель запущенной)"
+    ),
 
     # === sessions command ===
     "cli.sessions.doc": "Список всех активных сессий",

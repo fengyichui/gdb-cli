@@ -87,7 +87,7 @@ def format_gdb_value(
         return _format_int(val, target_type)
     elif target_type.code == gdb.TYPE_CODE_BOOL:
         return bool(val)
-    elif target_type.code == gdb.TYPE_CODE_FLOAT:
+    elif target_type.code == gdb.TYPE_CODE_FLT:
         return float(val)
     elif target_type.code == gdb.TYPE_CODE_VOID:
         return None
