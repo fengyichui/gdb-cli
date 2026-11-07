@@ -11,8 +11,9 @@ description: |
   - Get intelligent debugging assistance with source code context
 
   Requires: gdb-cli (pip install gdb-cli) and GDB 9.0+ with Python support.
-  For embedded J-Link debugging: JLinkGDBServer + arm-none-eabi-gdb (or the
-  matching cross GDB) with Python support.
+  For embedded J-Link debugging: JLinkGDBServer + a multi-target GDB
+  (gdb-multiarch, or the matching vendor cross GDB like arm-none-eabi-gdb)
+  with Python support.
 ---
 
 # GDB Debug Skill
@@ -42,7 +43,8 @@ gdb -nx -q -batch -ex "python print('OK')"
 If gdb-cli is not installed, guide the user: `pip install git+https://github.com/Cerdore/gdb-cli.git`
 
 For embedded J-Link debugging, also check (Step 0 below): JLinkGDBServer on
-PATH and a cross GDB (e.g. arm-none-eabi-gdb) with Python support.
+PATH and a multi-target GDB — the host's `gdb-multiarch` (Debian/Ubuntu) or
+a vendor cross GDB (e.g. arm-none-eabi-gdb) — with Python support.
 
 ## Workflow
 
@@ -60,7 +62,7 @@ gdb-cli jlink devices
 # USB probe: one command -> GDBServer + GDB session (returns session_id)
 gdb-cli jlink -d <device_name> --select usb=<serial_or_nickname> \
     --binary <firmware.elf> \
-    --gdb-path /opt/arm-none-eabi-gdb/bin/arm-none-eabi-gdb
+    --gdb-path /usr/bin/gdb-multiarch
 
 # Remote probe via J-Link Remote Server
 gdb-cli jlink -d <device_name> --select ip=<host>:<port> \
@@ -80,9 +82,13 @@ gdb-cli jlink stop --all                              # stop GDB session + serve
 - `ip=<host>:<port>` for remote probes (e.g. `ip=172.25.176.1:19025`).
 - `-d/--device` is the target MCU name J-Link knows (e.g. `nRF54L15_M33`,
   `STM32F407VG`). Wrong names fail fast with the GDBServer log tail.
-- Always pass `--gdb-path` pointing at a cross GDB (e.g. arm-none-eabi-gdb)
-  — the host `gdb` cannot speak these targets. `--binary <fw.elf>` loads
-  symbols so function names, types and source lines resolve.
+- Always pass `--gdb-path` pointing at a multi-target GDB. Either works:
+  the host's `gdb-multiarch` (Debian/Ubuntu package, covers ARM/RISC-V/
+  most targets: `--gdb-path /usr/bin/gdb-multiarch`) or the vendor's cross
+  GDB (e.g. `arm-none-eabi-gdb`). A plain host `gdb` usually only supports
+  the native architecture and will fail on embedded targets.
+  `--binary <fw.elf>` loads symbols so function names, types and source
+  lines resolve.
 - Fixed internal defaults: `-if SWD -nolocalhostonly -halt -nosilent -vd
   -noir -notimeout`, `-nogui` always forced, `-port` auto-picked. Extra
   JLinkGDBServer args pass through `--extra-arg` (e.g. `--extra-arg -rtos
