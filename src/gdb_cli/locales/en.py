@@ -154,6 +154,50 @@ ENGLISH_CATALOG = {
     # === env-check command ===
     "cli.env_check.doc": "Environment check: GDB version, ptrace permissions, Python version",
 
+    # === jlink command group ===
+    "cli.jlink.doc": "Manage JLinkGDBServer and automatically start a GDB session",
+    "cli.jlink.start.doc": "Start JLinkGDBServer and connect GDB",
+    "cli.jlink.stop.doc": "Stop JLinkGDBServer instance(s)",
+    "cli.jlink.restart.doc": "Restart a JLinkGDBServer instance",
+    "cli.jlink.status.doc": "Show JLinkGDBServer instance status",
+    "cli.jlink.devices.doc": "List attached J-Link probes",
+    "cli.jlink.device_help": "Target device name (e.g. nRF54L15_M33)",
+    "cli.jlink.select_help": "Probe selector: usb=<serial|nickname> or ip=HOST:PORT",
+    "cli.jlink.binary_help": "Executable file path for the GDB session (optional)",
+    "cli.jlink.gdb_path_help": "GDB executable path",
+    "cli.jlink.jlink_path_help": "JLinkGDBServer executable path",
+    "cli.jlink.speed_help": "Interface speed in kHz (default: auto)",
+    "cli.jlink.interface_help": "Debug interface (SWD/JTAG)",
+    "cli.jlink.port_help": "GDB server port (default: auto-selected free port)",
+    "cli.jlink.allow_write_help": "Allow memory modification",
+    "cli.jlink.allow_call_help": "Allow function calls",
+    "cli.jlink.timeout_help": "GDB heartbeat timeout in seconds (default: 600)",
+    "cli.jlink.extra_arg_help": "Extra raw JLinkGDBServer argument (repeatable)",
+    "cli.jlink.jlink_id_help": "J-Link instance ID",
+    "cli.jlink.all_help": "Apply to all instances",
+    "cli.jlink.select_required": "Missing --select (use usb=<serial|nickname> or ip=HOST:PORT)",
+    "cli.jlink.usb_selector_required": (
+        "Bare --select usb is not allowed; run 'gdb-cli jlink devices' "
+        "and use usb=<serial> or usb=<nickname>"
+    ),
+    "cli.jlink.ip_selector_required": "Invalid --select ip value; use ip=HOST:PORT",
+    "cli.jlink.device_required": "Missing --device (JLinkGDBServer requires a device name)",
+    "cli.jlink.port_busy": "Port {port} is already in use",
+    "cli.jlink.no_instance": "J-Link instance not found: {instance_id}",
+    "cli.jlink.ambiguous_instance": (
+        "Multiple J-Link instances are running; use --jlink-id: {instances}"
+    ),
+    "cli.jlink.start_failed": "Failed to start JLinkGDBServer",
+    "cli.jlink.connect_failed": "Failed to establish the GDB session",
+    "cli.jlink.stop_failed": "Failed to stop J-Link instance",
+    "cli.jlink.restart_failed": "Failed to restart J-Link instance",
+    "cli.jlink.devices_failed": "Failed to enumerate J-Link devices: {reason}",
+    "cli.jlink.process_exited": "JLinkGDBServer exited unexpectedly. Last log lines:\n{tail}",
+    "cli.jlink.ready_timeout": (
+        "JLinkGDBServer did not open port {port} within {timeout} seconds"
+    ),
+    "cli.jlink.no_instances": "No J-Link instances are running",
+
     # === Errors ===
     "errors.session_not_found": "Session not found: {session_id}",
     "errors.connection_error": "Connection error",

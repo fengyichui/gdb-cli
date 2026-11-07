@@ -152,6 +152,46 @@ RU_CATALOG = {
     # === env-check command ===
     "cli.env_check.doc": "Проверка окружения: версия GDB, права ptrace, версия Python",
 
+    # === jlink command group ===
+    "cli.jlink.doc": "Управление JLinkGDBServer с автоматическим запуском сессии GDB",
+    "cli.jlink.start.doc": "Запустить JLinkGDBServer и подключить GDB",
+    "cli.jlink.stop.doc": "Остановить экземпляр(ы) JLinkGDBServer",
+    "cli.jlink.restart.doc": "Перезапустить экземпляр JLinkGDBServer",
+    "cli.jlink.status.doc": "Показать состояние экземпляров JLinkGDBServer",
+    "cli.jlink.devices.doc": "Список подключённых отладчиков J-Link",
+    "cli.jlink.device_help": "Имя целевого устройства (например, nRF54L15_M33)",
+    "cli.jlink.select_help": "Выбор отладчика: usb=<серийный номер|никнейм> или ip=HOST:PORT",
+    "cli.jlink.binary_help": "Путь к исполняемому файлу для сессии GDB (опционально)",
+    "cli.jlink.gdb_path_help": "Путь к исполняемому файлу GDB",
+    "cli.jlink.jlink_path_help": "Путь к исполняемому файлу JLinkGDBServer",
+    "cli.jlink.speed_help": "Скорость интерфейса в кГц (по умолчанию: авто)",
+    "cli.jlink.interface_help": "Отладочный интерфейс (SWD/JTAG)",
+    "cli.jlink.port_help": "Порт GDB Server (по умолчанию: свободный порт)",
+    "cli.jlink.allow_write_help": "Разрешить изменение памяти",
+    "cli.jlink.allow_call_help": "Разрешить вызовы функций",
+    "cli.jlink.timeout_help": "Таймаут пульса GDB в секундах (по умолчанию: 600)",
+    "cli.jlink.extra_arg_help": "Дополнительный необработанный аргумент JLinkGDBServer (можно повторять)",
+    "cli.jlink.jlink_id_help": "ID экземпляра J-Link",
+    "cli.jlink.all_help": "Применить ко всем экземплярам",
+    "cli.jlink.select_required": "Не указан --select (используйте usb=<серийный номер|никнейм> или ip=HOST:PORT)",
+    "cli.jlink.usb_selector_required": (
+        "Нельзя указывать только --select usb; выполните 'gdb-cli jlink devices' "
+        "и используйте usb=<серийный номер> или usb=<никнейм>"
+    ),
+    "cli.jlink.ip_selector_required": "Неверное значение --select ip; используйте ip=HOST:PORT",
+    "cli.jlink.device_required": "Не указан --device (JLinkGDBServer требует имя устройства)",
+    "cli.jlink.port_busy": "Порт {port} уже используется",
+    "cli.jlink.no_instance": "Экземпляр J-Link не найден: {instance_id}",
+    "cli.jlink.ambiguous_instance": "Запущено несколько экземпляров J-Link; используйте --jlink-id: {instances}",
+    "cli.jlink.start_failed": "Не удалось запустить JLinkGDBServer",
+    "cli.jlink.connect_failed": "Не удалось установить сессию GDB",
+    "cli.jlink.stop_failed": "Не удалось остановить экземпляр J-Link",
+    "cli.jlink.restart_failed": "Не удалось перезапустить экземпляр J-Link",
+    "cli.jlink.devices_failed": "Не удалось перечислить устройства J-Link: {reason}",
+    "cli.jlink.process_exited": "JLinkGDBServer неожиданно завершился. Последние строки журнала:\n{tail}",
+    "cli.jlink.ready_timeout": "JLinkGDBServer не открыл порт {port} за {timeout} секунд",
+    "cli.jlink.no_instances": "Нет запущенных экземпляров J-Link",
+
     # === Errors ===
     "errors.session_not_found": "Сессия не найдена: {session_id}",
     "errors.connection_error": "Ошибка соединения",

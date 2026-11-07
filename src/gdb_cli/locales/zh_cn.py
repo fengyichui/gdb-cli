@@ -152,6 +152,46 @@ ZH_CN_CATALOG = {
     # === env-check command ===
     "cli.env_check.doc": "环境自检：gdb版本、ptrace权限、Python版本",
 
+    # === jlink command group ===
+    "cli.jlink.doc": "管理 JLinkGDBServer 并自动建立 GDB 会话",
+    "cli.jlink.start.doc": "启动 JLinkGDBServer 并连接 GDB",
+    "cli.jlink.stop.doc": "停止 JLinkGDBServer 实例",
+    "cli.jlink.restart.doc": "重启 JLinkGDBServer 实例",
+    "cli.jlink.status.doc": "查看 JLinkGDBServer 实例状态",
+    "cli.jlink.devices.doc": "列出已连接的 J-Link 调试器",
+    "cli.jlink.device_help": "目标设备名（如 nRF54L15_M33）",
+    "cli.jlink.select_help": "调试器选择器：usb=<序号|昵称> 或 ip=HOST:PORT",
+    "cli.jlink.binary_help": "GDB 会话要加载的可执行文件路径（可选）",
+    "cli.jlink.gdb_path_help": "GDB 可执行文件路径",
+    "cli.jlink.jlink_path_help": "JLinkGDBServer 可执行文件路径",
+    "cli.jlink.speed_help": "接口速度（kHz，默认自动）",
+    "cli.jlink.interface_help": "调试接口（SWD/JTAG）",
+    "cli.jlink.port_help": "GDB Server 端口（默认自动选择空闲端口）",
+    "cli.jlink.allow_write_help": "允许内存修改",
+    "cli.jlink.allow_call_help": "允许函数调用",
+    "cli.jlink.timeout_help": "GDB 心跳超时秒数（默认 600）",
+    "cli.jlink.extra_arg_help": "额外透传的 JLinkGDBServer 原始参数（可重复）",
+    "cli.jlink.jlink_id_help": "J-Link 实例 ID",
+    "cli.jlink.all_help": "对所有实例生效",
+    "cli.jlink.select_required": "缺少 --select（请使用 usb=<序号|昵称> 或 ip=HOST:PORT）",
+    "cli.jlink.usb_selector_required": (
+        "不允许只写 --select usb；请先运行 'gdb-cli jlink devices'，"
+        "再使用 usb=<序号> 或 usb=<昵称>"
+    ),
+    "cli.jlink.ip_selector_required": "--select ip 值非法；请使用 ip=HOST:PORT",
+    "cli.jlink.device_required": "缺少 --device（JLinkGDBServer 必须指定设备名）",
+    "cli.jlink.port_busy": "端口 {port} 已被占用",
+    "cli.jlink.no_instance": "未找到 J-Link 实例: {instance_id}",
+    "cli.jlink.ambiguous_instance": "存在多个 J-Link 实例，请使用 --jlink-id: {instances}",
+    "cli.jlink.start_failed": "JLinkGDBServer 启动失败",
+    "cli.jlink.connect_failed": "GDB 会话建立失败",
+    "cli.jlink.stop_failed": "停止 J-Link 实例失败",
+    "cli.jlink.restart_failed": "重启 J-Link 实例失败",
+    "cli.jlink.devices_failed": "J-Link 设备枚举失败: {reason}",
+    "cli.jlink.process_exited": "JLinkGDBServer 意外退出。最近日志：\n{tail}",
+    "cli.jlink.ready_timeout": "JLinkGDBServer 未在 {timeout} 秒内打开端口 {port}",
+    "cli.jlink.no_instances": "没有正在运行的 J-Link 实例",
+
     # === Errors ===
     "errors.session_not_found": "会话未找到: {session_id}",
     "errors.connection_error": "连接错误",
