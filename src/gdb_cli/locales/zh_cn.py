@@ -156,7 +156,7 @@ ZH_CN_CATALOG = {
     "cli.jlink.doc": "管理 JLinkGDBServer 并自动建立 GDB 会话",
     "cli.jlink.start.doc": "启动 JLinkGDBServer 并连接 GDB",
     "cli.jlink.stop.doc": "停止 JLinkGDBServer 实例",
-    "cli.jlink.restart.doc": "重启 JLinkGDBServer 实例",
+    "cli.jlink.restart.doc": "重启 JLinkGDBServer 实例（复用已保存的 GDB 会话设置）",
     "cli.jlink.status.doc": "查看 JLinkGDBServer 实例状态",
     "cli.jlink.devices.doc": "列出已连接的 J-Link 调试器",
     "cli.jlink.device_help": "目标设备名（如 nRF54L15_M33）",
@@ -191,6 +191,17 @@ ZH_CN_CATALOG = {
     "cli.jlink.process_exited": "JLinkGDBServer 意外退出。最近日志：\n{tail}",
     "cli.jlink.ready_timeout": "JLinkGDBServer 未在 {timeout} 秒内打开端口 {port}",
     "cli.jlink.no_instances": "没有正在运行的 J-Link 实例",
+    "cli.jlink.select_invalid": (
+        "无效的 --select 值: {value}"
+        "（允许的形式：usb=<序号|昵称> 或 ip=HOST:PORT）"
+    ),
+    "cli.jlink.extra_arg_protected": (
+        "额外参数 {arg} 由 gdb-cli 保留，不能覆盖"
+    ),
+    "cli.jlink.session_not_ready": (
+        "GDB 会话未进入就绪状态（最后状态: {state}，最后错误: {error}）"
+    ),
+    "cli.jlink.port_invalid": "无效端口: {port}（必须在 1-65535 之间）",
 
     # === Errors ===
     "errors.session_not_found": "会话未找到: {session_id}",

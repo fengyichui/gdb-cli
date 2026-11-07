@@ -10,6 +10,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 import pytest
+from click.core import ParameterSource
 
 from gdb_cli import jlink
 
@@ -89,7 +90,49 @@ def test_build_cmdline_custom_executable():
     assert cmdline[0] == "/opt/JLink/JLinkGDBServer"
 
 
-@pytest.mark.parametrize("select", ["usb", "ip", "usb=", "ip=", "", "ip=no-port"])
+@pytest.mark.parametrize("token", ["-select", "-gui", "-nogui", "-port", "-device", "-if"])
+def test_build_cmdline_rejects_protected_extra_args(token):
+    with pytest.raises(jlink.JLinkManagerError) as excinfo:
+        jlink.build_gdbserver_cmdline(
+            device="D", select="usb=1", port=2331, extra_args=[token, "x"],
+        )
+    assert token in str(excinfo.value)
+
+
+def test_build_cmdline_allows_unprotected_extra_args():
+    cmdline = jlink.build_gdbserver_cmdline(
+        device="D", select="usb=1", port=2331,
+        extra_args=["-rtos", "FreeRTOS", "-swoport", "19021", "-jlinkscriptfile", "a.jlink"],
+    )
+    assert "-rtos" in cmdline
+    assert "-swoport" in cmdline
+    assert "-jlinkscriptfile" in cmdline
+
+
+def test_build_cmdline_revalidates_select():
+    with pytest.raises(jlink.JLinkManagerError):
+        jlink.build_gdbserver_cmdline(
+            device="D", select="foo", port=2331, extra_args=[],
+        )
+
+
+@pytest.mark.parametrize("port", [0, -1, 65536, 70000])
+def test_build_cmdline_rejects_invalid_port(port):
+    with pytest.raises(jlink.JLinkManagerError):
+        jlink.build_gdbserver_cmdline(
+            device="D", select="usb=1", port=port, extra_args=[],
+        )
+
+
+@pytest.mark.parametrize(
+    "select",
+    [
+        "usb", "ip", "usb=", "ip=", "", "ip=no-port",
+        "usb=*", "USB=123", "foo", "123", "usb= 123", "usb=12 3",
+        "ip=host:0", "ip=host:65536", "ip=host:abc", "ip=:123",
+        "ip=host:", "ip=host", "ip=host:12 3", "usb=1\nusb=2",
+    ],
+)
 def test_validate_select_rejects_invalid(select):
     with pytest.raises(jlink.JLinkManagerError):
         jlink.validate_select(select)
@@ -101,11 +144,36 @@ def test_validate_select_usb_without_selector_mentions_devices():
     assert "gdb-cli jlink devices" in str(excinfo.value)
 
 
+def test_validate_select_ip_without_port_mentions_form():
+    with pytest.raises(jlink.JLinkManagerError) as excinfo:
+        jlink.validate_select("ip")
+    assert "ip=HOST:PORT" in str(excinfo.value)
+
+
 @pytest.mark.parametrize(
-    "select", ["usb=123", "usb=昵称", "ip=172.25.176.1:19025"]
+    "select", ["usb=123", "usb=昵称", "ip=172.25.176.1:19025", "usb=nRF54L15DK"]
 )
 def test_validate_select_accepts_valid(select):
-    jlink.validate_select(select)
+    assert jlink.validate_select(select) == select
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        (" usb=123 ", "usb=123"),
+        ("\tusb=nRF54L15DK", "usb=nRF54L15DK"),
+        ("  ip=10.0.0.1:2331  ", "ip=10.0.0.1:2331"),
+    ],
+)
+def test_validate_select_strips_and_returns_normalized(raw, expected):
+    assert jlink.validate_select(raw) == expected
+
+
+def test_validate_select_unknown_prefix_names_value():
+    with pytest.raises(jlink.JLinkManagerError) as excinfo:
+        jlink.validate_select("USB=123")
+    assert "USB=123" in str(excinfo.value)
+    assert "usb=" in str(excinfo.value)
 
 
 def test_find_free_port_returns_bound_port(monkeypatch):
@@ -211,6 +279,71 @@ def test_start_gdbserver_rejects_busy_port(jlink_dir, tmp_path, monkeypatch):
     popen.assert_not_called()
 
 
+def test_start_gdbserver_rechecks_process_after_port_ready(
+    jlink_dir, tmp_path, monkeypatch
+):
+    log_path = tmp_path / "server.log"
+    log_path.write_text("server died\n", encoding="utf-8")
+
+    process = Mock()
+    process.pid = 4242
+    # First poll: alive while waiting; second poll (after port ready): dead.
+    process.poll.side_effect = [None, 1]
+    monkeypatch.setattr(jlink.subprocess, "Popen", Mock(return_value=process))
+    probes = []
+
+    def fake_port_open(host, port):
+        probes.append((host, port))
+        return len(probes) > 1
+
+    monkeypatch.setattr(jlink, "_port_open", fake_port_open)
+
+    with pytest.raises(jlink.JLinkManagerError) as excinfo:
+        jlink.start_gdbserver(
+            ["JLinkGDBServer", "-device", "D", "-select", "usb=1", "-port", "2331"],
+            str(log_path),
+        )
+
+    assert "server died" in str(excinfo.value)
+    assert list(jlink_dir.glob("*.json")) == []
+
+
+def test_terminate_process_escalates_to_kill():
+    process = Mock()
+    process.wait.side_effect = [
+        jlink.subprocess.TimeoutExpired("proc", 5),
+        None,
+    ]
+
+    assert jlink._terminate_process(process) is True
+    process.terminate.assert_called_once()
+    process.kill.assert_called_once()
+
+
+def test_terminate_process_reports_survivor():
+    process = Mock()
+    process.wait.side_effect = [
+        jlink.subprocess.TimeoutExpired("proc", 5),
+        jlink.subprocess.TimeoutExpired("proc", 1),
+    ]
+    process.poll.return_value = None
+
+    assert jlink._terminate_process(process) is False
+
+
+def test_save_instance_is_atomic_and_round_trips(jlink_dir):
+    _make_instance(jlink_dir, instance_id="atom0001")
+    loaded = jlink.get_instance("atom0001")
+
+    assert loaded.instance_id == "atom0001"
+    assert loaded.session_id is None
+    assert loaded.session_config == {}
+    stored = json.loads((jlink_dir / "atom0001.json").read_text(encoding="utf-8"))
+    assert stored["session_id"] is None
+    # No temp files left behind.
+    assert list(jlink_dir.glob("*.tmp")) == []
+
+
 def test_stop_instance_mismatched_starttime_never_signals(jlink_dir, monkeypatch):
     _make_instance(jlink_dir)
     monkeypatch.setattr(jlink, "_read_proc_starttime", lambda pid: "999")
@@ -236,6 +369,46 @@ def test_stop_instance_matching_starttime_kills(jlink_dir, monkeypatch):
     kill.assert_any_call(4242, signal.SIGTERM)
     assert (jlink_dir / "abcd1234.json").exists() is False
     assert result["killed"] is True
+
+
+def test_stop_instance_reports_stop_failed_when_survivor(jlink_dir, monkeypatch):
+    _make_instance(jlink_dir)
+    monkeypatch.setattr(jlink, "_read_proc_starttime", lambda pid: "111")
+    monkeypatch.setattr(jlink.os, "kill", Mock())
+    monkeypatch.setattr(jlink, "_wait_process_exit", lambda pid, timeout=5.0: False)
+
+    result = jlink.stop_instance("abcd1234")
+
+    assert result["status"] == "stop_failed"
+    # Metadata is kept so the user can retry / inspect the log.
+    assert (jlink_dir / "abcd1234.json").exists()
+
+
+def test_stop_instance_confirmed_kill_removes_log(jlink_dir, monkeypatch):
+    instance = _make_instance(jlink_dir)
+    (jlink_dir / "abcd1234.log").write_text("log", encoding="utf-8")
+    monkeypatch.setattr(jlink, "_read_proc_starttime", lambda pid: "111")
+    monkeypatch.setattr(jlink.os, "kill", Mock(side_effect=[None, OSError()]))
+
+    result = jlink.stop_instance("abcd1234")
+
+    assert result["status"] == "stopped"
+    assert not (jlink_dir / "abcd1234.log").exists()
+    assert not (jlink_dir / "abcd1234.json").exists()
+    assert instance is not None
+
+
+def test_list_instances_includes_running_flag(jlink_dir, monkeypatch):
+    _make_instance(jlink_dir, instance_id="aaaa1111", pid=1001, start_time="111")
+    _make_instance(jlink_dir, instance_id="bbbb2222", pid=1002, start_time="111")
+
+    def fake_starttime(pid):
+        return "111" if pid == 1001 else "999"
+
+    monkeypatch.setattr(jlink, "_read_proc_starttime", fake_starttime)
+    states = {i.instance_id: i.running for i in jlink.list_instances()}
+
+    assert states == {"aaaa1111": True, "bbbb2222": False}
 
 
 def test_stop_instance_missing_metadata_errors(jlink_dir):
@@ -294,7 +467,7 @@ def test_enumerate_usb_devices_parses_sample_output(monkeypatch):
     }]
     args = run.call_args.args[0]
     assert args[0] == "JLinkExe"
-    assert run.call_args.kwargs["input"] == "ShowEmuList\n"
+    assert run.call_args.kwargs["input"] == "ShowEmuList\nexit\n"
 
 
 # ---------------------------------------------------------------------------
@@ -368,6 +541,10 @@ class _FakeClick(types.SimpleNamespace):
         return decorator
 
     @staticmethod
+    def IntRange(min=None, max=None):
+        return int
+
+    @staticmethod
     def argument(*args, **kwargs):
         def decorator(func):
             return func
@@ -402,6 +579,13 @@ class TestJLinkCLI(unittest.TestCase):
             port=2331,
             device="D",
             select="usb=1",
+            session_id=None,
+            session_config={},
+            cmdline=[
+                "JLinkGDBServer", "-nogui", "-device", "D",
+                "-select", "usb=1", "-port", "2331",
+            ],
+            log_path="/tmp/abcd1234.log",
         )
 
     def _call_jlink(self, **overrides):
@@ -426,11 +610,16 @@ class TestJLinkCLI(unittest.TestCase):
         ctx = _FakeContext(invoked_subcommand=None)
         _FakeClick._context = ctx
         fake_process = types.SimpleNamespace(
-            session=types.SimpleNamespace(session_id="sess1234")
+            session=types.SimpleNamespace(
+                session_id="sess1234", sock_path="/tmp/fake.sock"
+            )
         )
 
         with patch.object(self.cli, "start_gdbserver", return_value=self._instance()) as mock_start, \
              patch.object(self.cli, "launch_target", return_value=fake_process) as mock_launch, \
+             patch.object(self.cli, "_wait_session_ready",
+                          return_value={"state": "ready"}), \
+             patch.object(self.cli, "_save_instance"), \
              patch.object(self.cli, "print_json") as mock_print:
             self._call_jlink()
 
@@ -493,3 +682,337 @@ class TestJLinkCLI(unittest.TestCase):
             self._call_jlink()
 
         mock_start.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Task 3: session lifecycle, option scoping and stop hardening (pytest style)
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def cli_module():
+    """Import ``gdb_cli.cli`` with the FakeClick shim (several tests need it)."""
+    saved_click = sys.modules.get("click")
+    sys.modules["click"] = _FakeClick()
+    try:
+        sys.modules.pop("gdb_cli.cli", None)
+        module = importlib.import_module("gdb_cli.cli")
+        yield module
+    finally:
+        if saved_click is not None:
+            sys.modules["click"] = saved_click
+        else:
+            sys.modules.pop("click", None)
+
+
+class _ParamCtx:
+    def __init__(self, params, sources=None, parent=None):
+        self.params = params
+        self.sources = sources or {}
+        self.parent = parent
+
+    def get_parameter_source(self, name):
+        return self.sources.get(name)
+
+
+def _start_kwargs(**overrides):
+    values = {
+        "device": "D",
+        "select": "usb=1",
+        "binary": None,
+        "gdb_path": "gdb",
+        "jlink_path": "JLinkGDBServer",
+        "speed": None,
+        "interface": "SWD",
+        "port": 2331,
+        "allow_write": False,
+        "allow_call": False,
+        "timeout": 600,
+        "extra_args": (),
+    }
+    values.update(overrides)
+    return values
+
+
+def test_merge_group_params_subcommand_commandline_wins(cli_module):
+    parent = _ParamCtx(
+        {"device": "group-device"},
+        {"device": ParameterSource.COMMANDLINE},
+    )
+    ctx = _ParamCtx(
+        {"device": "sub-device"},
+        {"device": ParameterSource.COMMANDLINE},
+        parent,
+    )
+
+    merged = cli_module._merge_group_params(ctx, ("device",))
+
+    assert merged["device"] == "sub-device"
+
+
+def test_merge_group_params_falls_back_to_group_commandline(cli_module):
+    parent = _ParamCtx(
+        {"device": "group-device"},
+        {"device": ParameterSource.COMMANDLINE},
+    )
+    ctx = _ParamCtx(
+        {"device": None},
+        {"device": ParameterSource.DEFAULT},
+        parent,
+    )
+
+    merged = cli_module._merge_group_params(ctx, ("device",))
+
+    assert merged["device"] == "group-device"
+
+
+def test_merge_group_params_uses_subcommand_default(cli_module):
+    parent = _ParamCtx(
+        {"device": None},
+        {"device": ParameterSource.DEFAULT},
+    )
+    ctx = _ParamCtx(
+        {"device": "sub-default"},
+        {"device": ParameterSource.DEFAULT},
+        parent,
+    )
+
+    merged = cli_module._merge_group_params(ctx, ("device",))
+
+    assert merged["device"] == "sub-default"
+
+
+def test_wait_session_ready_returns_ready_status(cli_module):
+    client = Mock()
+    client.call.return_value = {"state": "ready"}
+
+    with patch.object(cli_module, "GDBClient", return_value=client):
+        result = cli_module._wait_session_ready("/tmp/fake.sock", timeout=1.0)
+
+    assert result["state"] == "ready"
+
+
+def test_wait_session_ready_times_out_while_loading(cli_module):
+    client = Mock()
+    client.call.return_value = {"state": "loading"}
+
+    with patch.object(cli_module, "GDBClient", return_value=client), \
+         patch.object(cli_module.time, "sleep", lambda seconds: None):
+        with pytest.raises(cli_module.JLinkManagerError) as excinfo:
+            cli_module._wait_session_ready("/tmp/fake.sock", timeout=0)
+
+    assert "loading" in str(excinfo.value)
+
+
+def test_start_failure_cascade_cleans_up_and_preserves_error(cli_module):
+    _FakeClick._context = _FakeContext(invoked_subcommand=None)
+    instance = types.SimpleNamespace(
+        instance_id="abcd1234",
+        port=2331,
+        device="D",
+        select="usb=1",
+        session_id=None,
+        session_config={},
+    )
+    fake_process = types.SimpleNamespace(
+        session=types.SimpleNamespace(
+            session_id="sess1234", sock_path="/tmp/fake.sock"
+        )
+    )
+    order = []
+
+    def fake_session_stop(session_id):
+        order.append(("session", session_id))
+
+    def fake_stop(instance_id):
+        order.append(("server", instance_id))
+        return {"jlink_id": instance_id, "status": "stopped"}
+
+    with patch.object(cli_module, "start_gdbserver", return_value=instance), \
+         patch.object(cli_module, "launch_target", return_value=fake_process), \
+         patch.object(
+             cli_module, "_wait_session_ready",
+             side_effect=cli_module.JLinkManagerError("not ready"),
+         ), \
+         patch.object(cli_module, "_stop_gdb_session", side_effect=fake_session_stop), \
+         patch.object(cli_module, "stop_instance", side_effect=fake_stop), \
+         patch.object(cli_module, "print_error") as mock_error, \
+         patch.object(cli_module, "print_json") as mock_print:
+        with pytest.raises(cli_module.click.exceptions.Exit) as excinfo:
+            cli_module.jlink(**_start_kwargs())
+
+    assert excinfo.value.exit_code == 1
+    assert order == [("session", "sess1234"), ("server", "abcd1234")]
+    mock_print.assert_not_called()
+    # Original reason stays in ``details``; cleanup did not replace it.
+    assert mock_error.call_args.args[1] == "not ready"
+
+
+def test_start_failure_cleanup_errors_are_separate(cli_module):
+    _FakeClick._context = _FakeContext(invoked_subcommand=None)
+    instance = types.SimpleNamespace(
+        instance_id="abcd1234",
+        port=2331,
+        device="D",
+        select="usb=1",
+        session_id=None,
+        session_config={},
+    )
+    fake_process = types.SimpleNamespace(
+        session=types.SimpleNamespace(
+            session_id="sess1234", sock_path="/tmp/fake.sock"
+        )
+    )
+
+    with patch.object(cli_module, "start_gdbserver", return_value=instance), \
+         patch.object(cli_module, "launch_target", return_value=fake_process), \
+         patch.object(
+             cli_module, "_wait_session_ready",
+             side_effect=cli_module.JLinkManagerError("not ready"),
+         ), \
+         patch.object(
+             cli_module, "_stop_gdb_session",
+             side_effect=RuntimeError("cleanup boom"),
+         ), \
+         patch.object(
+             cli_module, "stop_instance",
+             side_effect=RuntimeError("server boom"),
+         ), \
+         patch.object(cli_module, "print_error") as mock_error:
+        with pytest.raises(cli_module.click.exceptions.Exit):
+            cli_module.jlink(**_start_kwargs())
+
+    assert mock_error.call_args.args[1] == "not ready"
+    cleanup_errors = mock_error.call_args.args[2]
+    assert len(cleanup_errors) == 2
+    assert any("cleanup boom" in error for error in cleanup_errors)
+    assert any("server boom" in error for error in cleanup_errors)
+
+
+def test_stop_stops_session_before_server(cli_module, jlink_dir):
+    _make_instance(jlink_dir, session_id="sess1234")
+    order = []
+
+    def fake_session_stop(session_id):
+        order.append(("session", session_id))
+
+    def fake_stop(instance_id):
+        stored = json.loads(
+            (jlink_dir / f"{instance_id}.json").read_text(encoding="utf-8")
+        )
+        order.append(("server", stored["session_id"]))
+        return {"jlink_id": instance_id, "status": "stopped"}
+
+    with patch.object(cli_module, "_stop_gdb_session", side_effect=fake_session_stop), \
+         patch.object(cli_module, "stop_instance", side_effect=fake_stop), \
+         patch.object(cli_module, "print_json"):
+        cli_module.jlink_stop("abcd1234", False)
+
+    assert order == [("session", "sess1234"), ("server", None)]
+
+
+def test_stop_reports_stop_failed_and_exits(cli_module, jlink_dir):
+    _make_instance(jlink_dir)
+
+    with patch.object(
+        cli_module, "stop_instance",
+        return_value={"jlink_id": "abcd1234", "status": "stop_failed"},
+    ), patch.object(cli_module, "print_error") as mock_error, \
+         patch.object(cli_module, "print_json") as mock_print:
+        with pytest.raises(cli_module.click.exceptions.Exit) as excinfo:
+            cli_module.jlink_stop("abcd1234", False)
+
+    assert excinfo.value.exit_code == 1
+    mock_print.assert_not_called()
+    mock_error.assert_called_once()
+
+
+def test_stop_all_removes_dead_instance_jsons(cli_module, jlink_dir, monkeypatch):
+    _make_instance(jlink_dir, instance_id="aaaa1111", pid=1001, start_time="111")
+    _make_instance(jlink_dir, instance_id="bbbb2222", pid=1002, start_time="111")
+
+    def fake_starttime(pid):
+        return "111" if pid == 1001 else "999"
+
+    monkeypatch.setattr(jlink, "_read_proc_starttime", fake_starttime)
+
+    with patch.object(
+        cli_module, "stop_instance",
+        return_value={"jlink_id": "aaaa1111", "status": "stopped"},
+    ), patch.object(cli_module, "print_json") as mock_print:
+        cli_module.jlink_stop(None, True)
+
+    assert (jlink_dir / "aaaa1111.json").exists()
+    assert not (jlink_dir / "bbbb2222.json").exists()
+    payload = mock_print.call_args.args[0]
+    assert payload["removed_stale"] == ["bbbb2222"]
+
+
+def test_restart_reconnects_with_persisted_config(cli_module, jlink_dir):
+    _make_instance(
+        jlink_dir,
+        session_id="oldsess",
+        session_config={
+            "binary": "fw.elf",
+            "gdb_path": "arm-gdb",
+            "allow_write": True,
+            "allow_call": False,
+            "timeout": 120,
+        },
+    )
+    restarted = _make_instance(jlink_dir, instance_id="newinst1")
+    captured = {}
+
+    def fake_connect(instance, **kwargs):
+        captured.update(kwargs)
+        instance.session_id = "newsess"
+        return "newsess"
+
+    with patch.object(cli_module, "_stop_gdb_session") as mock_session_stop, \
+         patch.object(
+             cli_module, "stop_instance",
+             return_value={"jlink_id": "abcd1234", "status": "stopped"},
+         ), \
+         patch.object(cli_module, "start_gdbserver", return_value=restarted), \
+         patch.object(cli_module, "_connect_gdb_session", side_effect=fake_connect), \
+         patch.object(cli_module, "print_json") as mock_print:
+        cli_module.jlink_restart("abcd1234")
+
+    mock_session_stop.assert_called_once_with("oldsess")
+    assert captured == {
+        "binary": "fw.elf",
+        "gdb_path": "arm-gdb",
+        "allow_write": True,
+        "allow_call": False,
+        "timeout": 120,
+    }
+    payload = mock_print.call_args.args[0]
+    assert payload["session_id"] == "newsess"
+    assert payload["status"] == "restarted"
+
+
+def test_restart_connect_failure_cleans_up_and_exits(cli_module, jlink_dir):
+    _make_instance(jlink_dir, session_config={"binary": "fw.elf"})
+    restarted = _make_instance(jlink_dir, instance_id="newinst2")
+
+    with patch.object(cli_module, "_stop_gdb_session"), \
+         patch.object(
+             cli_module, "stop_instance",
+             return_value={"jlink_id": "abcd1234", "status": "stopped"},
+         ), \
+         patch.object(cli_module, "start_gdbserver", return_value=restarted), \
+         patch.object(
+             cli_module, "_connect_gdb_session",
+             side_effect=cli_module.JLinkManagerError("reconnect failed"),
+         ), \
+         patch.object(
+             cli_module, "_cleanup_failed_instance", return_value=["cleanup"]
+         ) as mock_cleanup, \
+         patch.object(cli_module, "print_error") as mock_error:
+        with pytest.raises(cli_module.click.exceptions.Exit) as excinfo:
+            cli_module.jlink_restart("abcd1234")
+
+    assert excinfo.value.exit_code == 1
+    mock_cleanup.assert_called_once_with(restarted)
+    assert mock_error.call_args.args[1] == "reconnect failed"
+    assert mock_error.call_args.args[2] == ["cleanup"]
+

@@ -158,7 +158,7 @@ ENGLISH_CATALOG = {
     "cli.jlink.doc": "Manage JLinkGDBServer and automatically start a GDB session",
     "cli.jlink.start.doc": "Start JLinkGDBServer and connect GDB",
     "cli.jlink.stop.doc": "Stop JLinkGDBServer instance(s)",
-    "cli.jlink.restart.doc": "Restart a JLinkGDBServer instance",
+    "cli.jlink.restart.doc": "Restart a JLinkGDBServer instance (reuses persisted GDB session settings)",
     "cli.jlink.status.doc": "Show JLinkGDBServer instance status",
     "cli.jlink.devices.doc": "List attached J-Link probes",
     "cli.jlink.device_help": "Target device name (e.g. nRF54L15_M33)",
@@ -197,6 +197,18 @@ ENGLISH_CATALOG = {
         "JLinkGDBServer did not open port {port} within {timeout} seconds"
     ),
     "cli.jlink.no_instances": "No J-Link instances are running",
+    "cli.jlink.select_invalid": (
+        "Invalid --select value: {value} "
+        "(accepted forms: usb=<serial|nickname> or ip=HOST:PORT)"
+    ),
+    "cli.jlink.extra_arg_protected": (
+        "Extra argument {arg} is reserved by gdb-cli and cannot be overridden"
+    ),
+    "cli.jlink.session_not_ready": (
+        "GDB session did not become ready "
+        "(last state: {state}, last error: {error})"
+    ),
+    "cli.jlink.port_invalid": "Invalid port: {port} (must be 1-65535)",
 
     # === Errors ===
     "errors.session_not_found": "Session not found: {session_id}",

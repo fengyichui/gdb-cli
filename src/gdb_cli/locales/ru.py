@@ -156,7 +156,7 @@ RU_CATALOG = {
     "cli.jlink.doc": "Управление JLinkGDBServer с автоматическим запуском сессии GDB",
     "cli.jlink.start.doc": "Запустить JLinkGDBServer и подключить GDB",
     "cli.jlink.stop.doc": "Остановить экземпляр(ы) JLinkGDBServer",
-    "cli.jlink.restart.doc": "Перезапустить экземпляр JLinkGDBServer",
+    "cli.jlink.restart.doc": "Перезапустить экземпляр JLinkGDBServer (использует сохранённые настройки сессии GDB)",
     "cli.jlink.status.doc": "Показать состояние экземпляров JLinkGDBServer",
     "cli.jlink.devices.doc": "Список подключённых отладчиков J-Link",
     "cli.jlink.device_help": "Имя целевого устройства (например, nRF54L15_M33)",
@@ -191,6 +191,18 @@ RU_CATALOG = {
     "cli.jlink.process_exited": "JLinkGDBServer неожиданно завершился. Последние строки журнала:\n{tail}",
     "cli.jlink.ready_timeout": "JLinkGDBServer не открыл порт {port} за {timeout} секунд",
     "cli.jlink.no_instances": "Нет запущенных экземпляров J-Link",
+    "cli.jlink.select_invalid": (
+        "Неверное значение --select: {value} "
+        "(допустимые формы: usb=<серийный номер|никнейм> или ip=HOST:PORT)"
+    ),
+    "cli.jlink.extra_arg_protected": (
+        "Дополнительный аргумент {arg} зарезервирован gdb-cli и не может быть переопределён"
+    ),
+    "cli.jlink.session_not_ready": (
+        "Сессия GDB не перешла в состояние готовности "
+        "(последнее состояние: {state}, последняя ошибка: {error})"
+    ),
+    "cli.jlink.port_invalid": "Неверный порт: {port} (должен быть 1-65535)",
 
     # === Errors ===
     "errors.session_not_found": "Сессия не найдена: {session_id}",

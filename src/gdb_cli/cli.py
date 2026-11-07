@@ -27,20 +27,22 @@ from .i18n import t
 from .jlink import (
     JLINK_DIR,
     JLinkManagerError,
+    _save_instance,
+    _validate_extra_args,
     build_gdbserver_cmdline,
+    delete_instance_metadata,
     enumerate_usb_devices,
     find_free_port,
     get_instance,
     list_instances,
-    restart_instance,
     start_gdbserver,
     stop_instance,
     validate_select,
 )
 from .launcher import GDBLauncherError, launch_attach, launch_core, launch_target
 from .session import (
-    _read_proc_starttime,
     cleanup_dead_sessions,
+    cleanup_session,
     find_session_by_core,
     find_session_by_pid,
     find_session_by_remote,
@@ -55,11 +57,17 @@ def print_json(data: dict) -> None:
     click.echo(json.dumps(data, indent=2, ensure_ascii=False))
 
 
-def print_error(message: str, details: Optional[str] = None) -> None:
+def print_error(
+    message: str,
+    details: Optional[str] = None,
+    cleanup_errors: Optional[list] = None,
+) -> None:
     """输出错误信息"""
     error = {"error": message}
     if details:
         error["details"] = details
+    if cleanup_errors:
+        error["cleanup_errors"] = cleanup_errors
     click.echo(json.dumps(error, indent=2), err=True)
 
 
@@ -771,6 +779,12 @@ def env_check(gdb_path) -> None:
     print_json(results)
 
 
+# Real click provides IntRange; the test-suite's FakeClick shims may not, in
+# which case a plain int is enough for import-time decoration only.
+_ClickIntRange = getattr(click, "IntRange", None)
+_PORT_TYPE = _ClickIntRange(1, 65535) if _ClickIntRange is not None else int
+
+
 def _jlink_start_options(func):
     """Attach the options shared by ``jlink`` and ``jlink start``."""
     func = click.option(
@@ -784,7 +798,10 @@ def _jlink_start_options(func):
     func = click.option(
         "--allow-write", is_flag=True, help=t("cli.jlink.allow_write_help")
     )(func)
-    func = click.option("--port", type=int, default=None, help=t("cli.jlink.port_help"))(func)
+    func = click.option(
+        "--port", type=_PORT_TYPE, default=None,
+        help=t("cli.jlink.port_help"),
+    )(func)
     func = click.option(
         "--if", "interface", default="SWD", help=t("cli.jlink.interface_help")
     )(func)
@@ -805,12 +822,237 @@ def _jlink_start_options(func):
     return func
 
 
+_JLINK_START_OPTION_NAMES = (
+    "device",
+    "select",
+    "binary",
+    "gdb_path",
+    "jlink_path",
+    "speed",
+    "interface",
+    "port",
+    "allow_write",
+    "allow_call",
+    "timeout",
+    "extra_args",
+)
+
+_SESSION_READY_POLL_INTERVAL = 0.2
+
+
+def _is_commandline(source) -> bool:
+    """True when a click ``ParameterSource`` came from the command line.
+
+    Compares by enum name so this module can still be imported under the
+    FakeClick shim used by the test-suite.
+    """
+    return getattr(source, "name", source) == "COMMANDLINE"
+
+
+def _merge_group_params(ctx, names=_JLINK_START_OPTION_NAMES) -> dict:
+    """Merge group-level and subcommand-level ``jlink`` options.
+
+    Precedence: explicit subcommand command line > explicit group command line
+    > subcommand default.  When the context cannot be introspected (direct
+    callback invocation, tests) an empty dict is returned and the caller keeps
+    the values it was already called with.
+    """
+    params = getattr(ctx, "params", None)
+    get_source = getattr(ctx, "get_parameter_source", None)
+    if not isinstance(params, dict) or not callable(get_source):
+        return {}
+
+    parent = getattr(ctx, "parent", None)
+    parent_params = getattr(parent, "params", None)
+    parent_get_source = getattr(parent, "get_parameter_source", None)
+
+    merged = {}
+    for name in names:
+        value = params.get(name)
+        if _is_commandline(get_source(name)):
+            merged[name] = value
+            continue
+        if (
+            isinstance(parent_params, dict)
+            and name in parent_params
+            and callable(parent_get_source)
+            and _is_commandline(parent_get_source(name))
+        ):
+            merged[name] = parent_params[name]
+            continue
+        merged[name] = value
+    return merged
+
+
+def _wait_session_ready(sock_path: str, timeout: float = 10.0) -> dict:
+    """Poll the GDB RPC server until the session reports ``state == ready``.
+
+    Raises ``JLinkManagerError`` on timeout (including the last state/error
+    observed) so callers can roll the whole start transaction back.
+    """
+    deadline = time.monotonic() + timeout
+    last_state = None
+    last_error = None
+
+    while True:
+        client = GDBClient(str(sock_path))
+        try:
+            result = client.call("status", timeout=5.0)
+            state = result.get("state")
+            if state == "ready":
+                return result
+            if state == "error":
+                last_state = state
+                last_error = result.get("error_reason") or last_error
+                raise JLinkManagerError(
+                    t(
+                        "cli.jlink.session_not_ready",
+                        state=last_state,
+                        error=last_error or "none",
+                    )
+                )
+            last_state = state
+        except JLinkManagerError:
+            raise
+        except GDBClientError as exc:
+            last_error = str(exc)
+        finally:
+            client.close()
+
+        if time.monotonic() >= deadline:
+            raise JLinkManagerError(
+                t(
+                    "cli.jlink.session_not_ready",
+                    state=last_state or "unknown",
+                    error=last_error or "none",
+                )
+            )
+        time.sleep(_SESSION_READY_POLL_INTERVAL)
+
+
+def _wait_gdb_process_exit(session, timeout: float = 5.0) -> None:
+    """Wait for a GDB session's process to exit (identity check not needed)."""
+    pid = getattr(session, "gdb_pid", None)
+    if not pid:
+        return
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            os.kill(pid, 0)
+        except OSError:
+            return
+        time.sleep(0.1)
+
+
+def _stop_gdb_session(session_id: str) -> None:
+    """Gracefully stop a GDB session, falling back to forced cleanup."""
+    session = get_session(session_id)
+    if session is None:
+        return
+
+    if session.sock_path:
+        try:
+            with GDBClient(str(session.sock_path)) as client:
+                client.call("stop", before_detach="")
+        except GDBClientError:
+            # Server unresponsive: force cleanup below.
+            pass
+        else:
+            _wait_gdb_process_exit(session)
+
+    cleanup_session(session_id)
+
+
+def _stop_associated_session(instance) -> list:
+    """Stop the GDB session attached to ``instance`` (best effort).
+
+    Returns a list of cleanup error strings; never raises.
+    """
+    errors = []
+    session_id = getattr(instance, "session_id", None)
+    if not session_id:
+        return errors
+
+    try:
+        _stop_gdb_session(session_id)
+    except Exception as exc:  # pragma: no cover - defensive
+        errors.append(f"session {session_id}: {exc}")
+
+    instance.session_id = None
+    try:
+        _save_instance(instance)
+    except Exception as exc:
+        errors.append(f"failed to persist instance {instance.instance_id}: {exc}")
+    return errors
+
+
+def _connect_gdb_session(
+    instance,
+    *,
+    binary: Optional[str],
+    gdb_path: str,
+    allow_write: bool,
+    allow_call: bool,
+    timeout: int,
+) -> str:
+    """Create a GDB session for ``instance`` and wait until it is ready."""
+    gdb_process = launch_target(
+        remote=f"127.0.0.1:{instance.port}",
+        binary=binary,
+        timeout=timeout,
+        allow_write=allow_write,
+        allow_call=allow_call,
+        gdb_path=gdb_path,
+    )
+    session = gdb_process.session
+    # Record the id immediately so failure cleanup can find the session.
+    instance.session_id = session.session_id
+    instance.session_config = {
+        "binary": binary,
+        "gdb_path": gdb_path,
+        "allow_write": allow_write,
+        "allow_call": allow_call,
+        "timeout": timeout,
+    }
+
+    _wait_session_ready(session.sock_path)
+    _save_instance(instance)
+    return session.session_id
+
+
+def _cleanup_failed_instance(instance) -> list:
+    """Best-effort rollback of a partially started instance.
+
+    Each step is isolated so a cleanup failure can never mask the original
+    startup error.
+    """
+    errors = []
+
+    session_id = getattr(instance, "session_id", None)
+    if session_id:
+        try:
+            _stop_gdb_session(session_id)
+        except Exception as exc:
+            errors.append(f"session {session_id}: {exc}")
+
+    try:
+        result = stop_instance(instance.instance_id)
+        if result.get("status") == "stop_failed":
+            errors.append(
+                f"JLinkGDBServer {instance.instance_id} did not stop"
+            )
+    except Exception as exc:
+        errors.append(f"stop_instance {instance.instance_id}: {exc}")
+
+    return errors
+
+
 def _resolve_instance_id(instance_id: Optional[str]) -> str:
     """Return the requested id, or the only running one when unambiguous."""
     if instance_id:
         return instance_id
 
-    instances = list_instances()
+    instances = [instance for instance in list_instances() if instance.running]
     if not instances:
         raise JLinkManagerError(t("cli.jlink.no_instances"))
     if len(instances) > 1:
@@ -881,61 +1123,79 @@ def jlink_start(
     extra_args,
 ) -> None:
     """Start JLinkGDBServer and connect GDB"""
+    ctx = click.get_current_context()
+    merged = _merge_group_params(ctx)
+    if merged:
+        device = merged.get("device", device)
+        select = merged.get("select", select)
+        binary = merged.get("binary", binary)
+        gdb_path = merged.get("gdb_path", gdb_path)
+        jlink_path = merged.get("jlink_path", jlink_path)
+        speed = merged.get("speed", speed)
+        interface = merged.get("interface", interface)
+        port = merged.get("port", port)
+        allow_write = merged.get("allow_write", allow_write)
+        allow_call = merged.get("allow_call", allow_call)
+        timeout = merged.get("timeout", timeout)
+        extra_args = merged.get("extra_args", extra_args)
+
     try:
         if not device:
             raise JLinkManagerError(t("cli.jlink.device_required"))
-        validate_select(select or "")
+        select = validate_select(select or "")
+        _validate_extra_args(list(extra_args or ()))
+        if port is None:
+            port = find_free_port()
+        cmdline = build_gdbserver_cmdline(
+            device=device,
+            select=select,
+            port=port,
+            speed=speed,
+            interface=interface,
+            extra_args=list(extra_args or ()),
+            jlink_exe=jlink_path,
+        )
     except JLinkManagerError as e:
         print_error(str(e))
         raise click.exceptions.Exit(1)
-
-    if port is None:
-        port = find_free_port()
-
-    cmdline = build_gdbserver_cmdline(
-        device=device,
-        select=select or "",
-        port=port,
-        speed=speed,
-        interface=interface,
-        extra_args=list(extra_args or ()),
-        jlink_exe=jlink_path,
-    )
 
     jlink_id = uuid.uuid4().hex[:8]
     log_path = str(JLINK_DIR / f"{jlink_id}.log")
 
     try:
         instance = start_gdbserver(cmdline, log_path, instance_id=jlink_id)
-    except JLinkManagerError as e:
+    except Exception as e:
         print_error(t("cli.jlink.start_failed"), str(e))
         raise click.exceptions.Exit(1)
 
     try:
-        gdb_process = launch_target(
-            remote=f"127.0.0.1:{instance.port}",
+        session_id = _connect_gdb_session(
+            instance,
             binary=binary,
-            timeout=timeout,
+            gdb_path=gdb_path,
             allow_write=allow_write,
             allow_call=allow_call,
-            gdb_path=gdb_path,
+            timeout=timeout,
         )
-    except GDBLauncherError as e:
-        # Do not leave an orphan GDBServer behind when GDB cannot attach.
-        stop_instance(instance.instance_id)
-        print_error(t("cli.jlink.connect_failed"), str(e))
-        raise click.exceptions.Exit(1)
-    except Exception as e:
-        stop_instance(instance.instance_id)
-        print_error(t("cli.jlink.connect_failed"), str(e))
-        raise click.exceptions.Exit(1)
+    except BaseException as exc:
+        # Roll the whole transaction back; cleanup errors must not replace the
+        # original failure reason.
+        cleanup_errors = _cleanup_failed_instance(instance)
+        print_error(
+            t("cli.jlink.connect_failed"),
+            str(exc) or exc.__class__.__name__,
+            cleanup_errors or None,
+        )
+        if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+            raise
+        raise click.exceptions.Exit(1) from exc
 
     print_json({
         "jlink_id": instance.instance_id,
         "port": instance.port,
         "device": instance.device,
         "select": instance.select,
-        "session_id": gdb_process.session.session_id,
+        "session_id": session_id,
         "status": "started",
     })
 
@@ -950,17 +1210,55 @@ def jlink_stop(jlink_id: Optional[str], all_instances: bool) -> None:
             instances = list_instances()
             if not instances:
                 raise JLinkManagerError(t("cli.jlink.no_instances"))
-            results = [stop_instance(instance.instance_id) for instance in instances]
+
+            results = []
+            removed_stale = []
+            for instance in instances:
+                if not instance.running:
+                    # Dead record (process gone or PID recycled): drop the
+                    # metadata instead of reporting a bogus stop.
+                    delete_instance_metadata(instance.instance_id)
+                    removed_stale.append(instance.instance_id)
+                    continue
+                cleanup_errors = _stop_associated_session(instance)
+                result = stop_instance(instance.instance_id)
+                if cleanup_errors:
+                    result["session_cleanup_errors"] = cleanup_errors
+                results.append(result)
+
+            failed = [
+                result for result in results
+                if result.get("status") == "stop_failed"
+            ]
+            if failed:
+                print_error(
+                    t("cli.jlink.stop_failed"),
+                    json.dumps({"failed": failed, "removed_stale": removed_stale}),
+                )
+                raise click.exceptions.Exit(1)
+
             print_json({
                 "stopped": results,
+                "removed_stale": removed_stale,
                 "count": len(results),
                 "status": "stopped",
             })
             return
 
         resolved = _resolve_instance_id(jlink_id)
+        instance = get_instance(resolved)
+        if instance is None:
+            raise JLinkManagerError(
+                t("cli.jlink.no_instance", instance_id=resolved)
+            )
+
+        cleanup_errors = _stop_associated_session(instance)
         result = stop_instance(resolved)
-        result["status"] = "stopped"
+        if cleanup_errors:
+            result["session_cleanup_errors"] = cleanup_errors
+        if result.get("status") == "stop_failed":
+            print_error(t("cli.jlink.stop_failed"), json.dumps(result))
+            raise click.exceptions.Exit(1)
         print_json(result)
     except JLinkManagerError as e:
         print_error(t("cli.jlink.stop_failed"), str(e))
@@ -973,18 +1271,63 @@ def jlink_restart(jlink_id: Optional[str]) -> None:
     """Restart a JLinkGDBServer instance"""
     try:
         resolved = _resolve_instance_id(jlink_id)
-        instance = restart_instance(resolved)
-    except JLinkManagerError as e:
+        instance = get_instance(resolved)
+        if instance is None:
+            raise JLinkManagerError(
+                t("cli.jlink.no_instance", instance_id=resolved)
+            )
+
+        session_cleanup_errors = _stop_associated_session(instance)
+        stop_result = stop_instance(resolved)
+        if stop_result.get("status") == "stop_failed":
+            print_error(t("cli.jlink.stop_failed"), json.dumps(stop_result))
+            raise click.exceptions.Exit(1)
+
+        restarted = start_gdbserver(
+            instance.cmdline,
+            instance.log_path,
+            instance_id=instance.instance_id,
+        )
+    except click.exceptions.Exit:
+        raise
+    except Exception as e:
         print_error(t("cli.jlink.restart_failed"), str(e))
         raise click.exceptions.Exit(1)
 
-    print_json({
-        "jlink_id": instance.instance_id,
-        "port": instance.port,
-        "device": instance.device,
-        "select": instance.select,
+    # Reconnect using the persisted session settings; users who want different
+    # settings should stop and start again.
+    config = dict(instance.session_config or {})
+    try:
+        session_id = _connect_gdb_session(
+            restarted,
+            binary=config.get("binary"),
+            gdb_path=config.get("gdb_path") or "gdb",
+            allow_write=bool(config.get("allow_write", False)),
+            allow_call=bool(config.get("allow_call", False)),
+            timeout=config.get("timeout", 600),
+        )
+    except BaseException as exc:
+        cleanup_errors = _cleanup_failed_instance(restarted)
+        print_error(
+            t("cli.jlink.connect_failed"),
+            str(exc) or exc.__class__.__name__,
+            cleanup_errors or None,
+        )
+        if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+            raise
+        raise click.exceptions.Exit(1) from exc
+
+    payload = {
+        "jlink_id": restarted.instance_id,
+        "port": restarted.port,
+        "device": restarted.device,
+        "select": restarted.select,
+        "session_id": session_id,
         "status": "restarted",
-    })
+    }
+    if session_cleanup_errors:
+        payload["session_cleanup_errors"] = session_cleanup_errors
+    print_json(payload)
 
 
 @jlink.command("status", help=t("cli.jlink.status.doc"))
@@ -1007,14 +1350,6 @@ def jlink_status(jlink_id: Optional[str]) -> None:
 
     entries = []
     for instance in instances:
-        current_start_time = (
-            _read_proc_starttime(instance.pid) if instance.pid else None
-        )
-        running = (
-            current_start_time is not None
-            and instance.start_time is not None
-            and current_start_time == instance.start_time
-        )
         entries.append({
             "jlink_id": instance.instance_id,
             "port": instance.port,
@@ -1023,7 +1358,8 @@ def jlink_status(jlink_id: Optional[str]) -> None:
             "pid": instance.pid,
             "log_path": instance.log_path,
             "started_at": instance.started_at,
-            "running": running,
+            "running": instance.running,
+            "session_id": instance.session_id,
         })
 
     print_json({"instances": entries, "count": len(entries)})

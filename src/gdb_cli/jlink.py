@@ -11,9 +11,11 @@ import re
 import signal
 import socket
 import subprocess
+import tempfile
 import time
 import uuid
-from dataclasses import asdict, dataclass
+from collections import deque
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -27,6 +29,15 @@ DEFAULT_ENUM_EXE = "JLinkExe"
 
 _READY_POLL_INTERVAL = 0.2
 _TAIL_LINES = 15
+
+# Parameters owned by this module.  Extra user arguments must never be able to
+# override them, otherwise the persisted instance metadata would lie.
+_PROTECTED_GDBSERVER_ARGS = {"-select", "-port", "-device", "-if", "-gui", "-nogui"}
+
+# Characters that must never appear in a probe selector/host: whitespace and
+# ASCII control characters.
+_UNSAFE_SELECTOR_RE = re.compile(r"[\s\x00-\x1f\x7f]")
+_PORT_RE = re.compile(r"^[0-9]+$")
 
 
 class JLinkManagerError(Exception):
@@ -47,6 +58,10 @@ class JLinkInstance:
     log_path: str
     started_at: float
     extra: Dict[str, str]
+    session_id: Optional[str] = None
+    session_config: Dict = field(default_factory=dict)
+    # Transient: computed on read, never persisted (see ``_save_instance``).
+    running: bool = False
 
 
 def _new_instance_id() -> str:
@@ -58,6 +73,78 @@ def _value_after(args: List[str], option: str) -> Optional[str]:
         return args[args.index(option) + 1]
     except (ValueError, IndexError):
         return None
+
+
+def _validate_port(port: int) -> int:
+    """Return ``port`` as an int, raising when it is outside 1-65535."""
+    try:
+        port_number = int(port)
+    except (TypeError, ValueError):
+        port_number = 0
+    if not 1 <= port_number <= 65535:
+        raise JLinkManagerError(t("cli.jlink.port_invalid", port=port))
+    return port_number
+
+
+def validate_select(select: str) -> str:
+    """Validate and normalize the user supplied ``-select`` value.
+
+    Only a closed set of forms is accepted:
+
+    * ``usb=<selector>`` where ``<selector>`` is non-empty, contains no
+      whitespace/control characters and is not ``*``.
+    * ``ip=<host>:<port>`` where ``<host>`` is non-empty without whitespace and
+      ``<port>`` is an integer in 1-65535.
+
+    A bare ``usb`` or ``ip`` would make JLinkGDBServer fall back to its GUI
+    device picker when several probes are attached.  We never allow that.
+
+    Returns the normalized (stripped) selector.
+    """
+    raw = select or ""
+    if "\n" in raw or "\r" in raw:
+        raise JLinkManagerError(t("cli.jlink.select_invalid", value=raw))
+
+    value = raw.strip()
+    if not value:
+        raise JLinkManagerError(t("cli.jlink.select_required"))
+
+    if value == "usb":
+        raise JLinkManagerError(t("cli.jlink.usb_selector_required"))
+    if value == "ip":
+        raise JLinkManagerError(t("cli.jlink.ip_selector_required"))
+
+    if value.startswith("usb="):
+        selector = value[len("usb="):]
+        if (
+            not selector
+            or selector == "*"
+            or _UNSAFE_SELECTOR_RE.search(selector)
+        ):
+            raise JLinkManagerError(t("cli.jlink.select_invalid", value=value))
+        return value
+
+    if value.startswith("ip="):
+        host_port = value[len("ip="):]
+        host, sep, port_text = host_port.rpartition(":")
+        if not sep or not host or _UNSAFE_SELECTOR_RE.search(host):
+            raise JLinkManagerError(t("cli.jlink.select_invalid", value=value))
+        if not _PORT_RE.match(port_text):
+            raise JLinkManagerError(t("cli.jlink.select_invalid", value=value))
+        if not 1 <= int(port_text) <= 65535:
+            raise JLinkManagerError(t("cli.jlink.select_invalid", value=value))
+        return value
+
+    raise JLinkManagerError(t("cli.jlink.select_invalid", value=value))
+
+
+def _validate_extra_args(extra_args: List[str]) -> None:
+    """Reject extra arguments that would override protected parameters."""
+    for token in extra_args or []:
+        if token in _PROTECTED_GDBSERVER_ARGS:
+            raise JLinkManagerError(
+                t("cli.jlink.extra_arg_protected", arg=token)
+            )
 
 
 def build_gdbserver_cmdline(
@@ -75,6 +162,10 @@ def build_gdbserver_cmdline(
     ``-nogui`` and the fixed defaults are always forced.  ``-speed`` is only
     added when explicitly requested (otherwise SEGGER auto-detects it).
     """
+    port_number = _validate_port(port)
+    normalized_select = validate_select(select)
+    _validate_extra_args(list(extra_args or []))
+
     cmdline = [
         jlink_exe,
         "-nogui",
@@ -86,35 +177,14 @@ def build_gdbserver_cmdline(
         "-noir",
         "-notimeout",
         "-device", device,
-        "-select", select,
-        "-port", str(port),
+        "-select", normalized_select,
+        "-port", str(port_number),
     ]
     if speed:
         cmdline.extend(["-speed", str(speed)])
     if extra_args:
         cmdline.extend(extra_args)
     return cmdline
-
-
-def validate_select(select: str) -> None:
-    """Validate the user supplied ``-select`` value.
-
-    A bare ``usb`` or ``ip`` would make JLinkGDBServer fall back to its GUI
-    device picker when several probes are attached.  We never allow that.
-    """
-    if not select:
-        raise JLinkManagerError(t("cli.jlink.select_required"))
-
-    if select == "usb" or select.startswith("usb="):
-        if select.startswith("usb=") and len(select) > len("usb="):
-            return
-        raise JLinkManagerError(t("cli.jlink.usb_selector_required"))
-
-    if select == "ip" or select.startswith("ip="):
-        value = select[len("ip="):] if select.startswith("ip=") else ""
-        if value and ":" in value:
-            return
-        raise JLinkManagerError(t("cli.jlink.ip_selector_required"))
 
 
 def find_free_port() -> int:
@@ -137,10 +207,13 @@ def _port_open(host: str, port: int, timeout: float = 0.5) -> bool:
 
 def _tail_log(log_path: str, lines: int = _TAIL_LINES) -> str:
     try:
-        content = Path(log_path).read_text(encoding="utf-8", errors="replace")
+        with open(log_path, encoding="utf-8", errors="replace") as log_file:
+            tail = deque(
+                (line.rstrip("\n") for line in log_file), maxlen=lines
+            )
     except OSError:
         return ""
-    return "\n".join(content.splitlines()[-lines:])
+    return "\n".join(tail)
 
 
 def _wait_process_exit(pid: int, timeout: float = 5.0) -> bool:
@@ -160,26 +233,69 @@ def _instance_path(instance_id: str) -> Path:
 
 
 def _save_instance(instance: JLinkInstance) -> None:
+    """Persist instance metadata atomically (temp file + ``os.replace``)."""
     JLINK_DIR.mkdir(parents=True, exist_ok=True)
-    _instance_path(instance.instance_id).write_text(
-        json.dumps(asdict(instance), indent=2), encoding="utf-8"
-    )
+    data = asdict(instance)
+    # ``running`` is derived from the live process and must not be persisted.
+    data.pop("running", None)
+
+    temp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            dir=JLINK_DIR,
+            delete=False,
+            suffix=".tmp",
+            encoding="utf-8",
+        ) as temp_file:
+            temp_path = temp_file.name
+            json.dump(data, temp_file, indent=2)
+        os.replace(temp_path, _instance_path(instance.instance_id))
+    except Exception:
+        if temp_path is not None:
+            try:
+                Path(temp_path).unlink()
+            except OSError:
+                pass
+        raise
 
 
-def _delete_metadata(instance_id: str) -> None:
+def delete_instance_metadata(instance_id: str) -> None:
+    """Remove the persisted JSON for ``instance_id`` (best effort)."""
     try:
         _instance_path(instance_id).unlink()
     except OSError:
         pass
 
 
+# Backwards-compatible private alias.
+_delete_metadata = delete_instance_metadata
+
+
+def delete_instance_log(log_path: str) -> None:
+    """Remove an instance log file (best effort)."""
+    try:
+        Path(log_path).unlink()
+    except OSError:
+        pass
+
+
+def _is_instance_running(instance: JLinkInstance) -> bool:
+    """Return True when the persisted PID still identifies our process."""
+    if instance.pid is None or instance.start_time is None:
+        return False
+    return _read_proc_starttime(instance.pid) == instance.start_time
+
+
 def get_instance(instance_id: str) -> Optional[JLinkInstance]:
     try:
         raw = _instance_path(instance_id).read_text(encoding="utf-8")
         data = json.loads(raw)
-        return JLinkInstance(**data)
+        instance = JLinkInstance(**data)
     except (OSError, ValueError, TypeError):
         return None
+    instance.running = _is_instance_running(instance)
+    return instance
 
 
 def list_instances() -> List[JLinkInstance]:
@@ -207,7 +323,11 @@ def start_gdbserver(
     port = _value_after(cmdline, "-port")
     if port is None:
         raise JLinkManagerError("JLinkGDBServer command line is missing -port")
-    port_number = int(port)
+    port_number = _validate_port(port)
+
+    # Re-validate at the spawn boundary: the CLI already did this, but a
+    # caller could have built the command line by hand.
+    validate_select(_value_after(cmdline, "-select") or "")
 
     # Probe before spawning so an explicitly requested busy port fails with a
     # clear message instead of an opaque server crash.
@@ -244,8 +364,18 @@ def start_gdbserver(
 
     if not ready:
         _terminate_process(process)
+        # Defensive: make sure no partial metadata survives the failure.
+        delete_instance_metadata(instance_id)
         raise JLinkManagerError(
             t("cli.jlink.ready_timeout", port=port_number, timeout=wait_timeout)
+        )
+
+    # Close the "port opened then died" window as cheaply as possible.
+    if process.poll() is not None:
+        log_tail = _tail_log(log_path)
+        delete_instance_metadata(instance_id)
+        raise JLinkManagerError(
+            t("cli.jlink.process_exited", tail=log_tail or "<no log output>")
         )
 
     instance = JLinkInstance(
@@ -260,27 +390,73 @@ def start_gdbserver(
         started_at=time.time(),
         extra={},
     )
-    _save_instance(instance)
+    try:
+        _save_instance(instance)
+    except Exception:
+        # Transactional rollback: never leave a live server without metadata.
+        _terminate_process(process)
+        delete_instance_metadata(instance_id)
+        raise
     return instance
 
 
-def _terminate_process(process) -> None:
+def _terminate_process(
+    process, term_timeout: float = 5.0, kill_timeout: float = 1.0
+) -> bool:
+    """Terminate ``process``, escalating to SIGKILL.
+
+    Returns True when the process is confirmed dead.
+    """
     try:
         process.terminate()
     except OSError:
-        return
+        return process.poll() is not None
+
     try:
-        process.wait(timeout=5)
-    except (OSError, subprocess.TimeoutExpired):
+        process.wait(timeout=term_timeout)
+        return True
+    except subprocess.TimeoutExpired:
         pass
+    except OSError:
+        pass
+
+    try:
+        process.kill()
+    except OSError:
+        return process.poll() is not None
+
+    try:
+        process.wait(timeout=kill_timeout)
+        return True
+    except (subprocess.TimeoutExpired, OSError):
+        return process.poll() is not None
+
+
+def _identity_matches(instance: JLinkInstance) -> bool:
+    if instance.pid is None or instance.start_time is None:
+        return False
+    return _read_proc_starttime(instance.pid) == instance.start_time
+
+
+def _stop_result(instance_id: str, pid: Optional[int], killed: bool, status: str) -> dict:
+    return {
+        "jlink_id": instance_id,
+        "pid": pid,
+        "killed": killed,
+        "status": status,
+    }
 
 
 def stop_instance(instance_id: str) -> dict:
     """Stop one persisted JLinkGDBServer instance.
 
     The PID is only signalled when ``/proc/<pid>`` still reports the persisted
-    starttime.  A recycled PID therefore never receives a signal; we only drop
-    the stale metadata.
+    starttime.  A recycled PID therefore never receives a signal.
+
+    Returns ``status``: ``stopped`` when the process is confirmed gone,
+    ``not_running`` when the persisted process had already exited, and
+    ``stop_failed`` when the process survived SIGTERM+SIGKILL (metadata and log
+    are kept so the user can retry / inspect).
     """
     instance = get_instance(instance_id)
     if instance is None:
@@ -290,43 +466,50 @@ def stop_instance(instance_id: str) -> dict:
 
     pid = instance.pid
     if pid is None:
-        _delete_metadata(instance_id)
-        return {"jlink_id": instance_id, "pid": None, "killed": False, "status": "stopped"}
+        delete_instance_metadata(instance_id)
+        delete_instance_log(instance.log_path)
+        return _stop_result(instance_id, None, False, "stopped")
 
-    current_start_time = _read_proc_starttime(pid)
-    if (
-        current_start_time is None
-        or instance.start_time is None
-        or current_start_time != instance.start_time
-    ):
-        _delete_metadata(instance_id)
-        return {
-            "jlink_id": instance_id,
-            "pid": pid,
-            "killed": False,
-            "status": "not_running",
-        }
+    if not _identity_matches(instance):
+        # The original process is already gone (or its PID was reused); it is
+        # safe to report it as stopped, but never signal the recycled PID.
+        delete_instance_metadata(instance_id)
+        delete_instance_log(instance.log_path)
+        return _stop_result(instance_id, pid, False, "stopped")
+
+    def _finalize() -> dict:
+        delete_instance_metadata(instance_id)
+        delete_instance_log(instance.log_path)
+        return _stop_result(instance_id, pid, True, "stopped")
 
     try:
         os.kill(pid, signal.SIGTERM)
     except OSError:
-        _delete_metadata(instance_id)
-        return {
-            "jlink_id": instance_id,
-            "pid": pid,
-            "killed": False,
-            "status": "not_running",
-        }
+        if not _identity_matches(instance):
+            delete_instance_metadata(instance_id)
+            return _stop_result(instance_id, pid, False, "stopped")
+        return _stop_result(instance_id, pid, False, "stop_failed")
 
-    if not _wait_process_exit(pid, timeout=5.0):
-        try:
-            os.kill(pid, signal.SIGKILL)
-        except OSError:
-            pass
-        _wait_process_exit(pid, timeout=2.0)
+    if _wait_process_exit(pid, timeout=5.0):
+        return _finalize()
 
-    _delete_metadata(instance_id)
-    return {"jlink_id": instance_id, "pid": pid, "killed": True, "status": "stopped"}
+    # Before escalating, re-verify identity: the original may have exited and
+    # its PID may now belong to an unrelated process.
+    if not _identity_matches(instance):
+        return _finalize()
+
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except OSError:
+        pass
+
+    if _wait_process_exit(pid, timeout=2.0):
+        return _finalize()
+
+    if not _identity_matches(instance):
+        return _finalize()
+
+    return _stop_result(instance_id, pid, True, "stop_failed")
 
 
 def restart_instance(instance_id: str) -> JLinkInstance:
@@ -361,7 +544,7 @@ def enumerate_usb_devices(jlink_exe: str = DEFAULT_ENUM_EXE) -> List[dict]:
     try:
         completed = subprocess.run(
             [jlink_exe, "-nogui", "1"],
-            input="ShowEmuList\n",
+            input="ShowEmuList\nexit\n",
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
