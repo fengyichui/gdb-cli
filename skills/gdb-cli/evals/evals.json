@@ -24,6 +24,38 @@
       "expected_output": "Should analyze all threads, look for lock patterns, and provide deadlock analysis",
       "files": [],
       "assertions": []
+    },
+    {
+      "id": 4,
+      "name": "jlink-embedded-start",
+      "prompt": "I have an nRF54L15DK board connected via a J-Link probe (USB, nickname nRF54L15DK) and my firmware ELF at ./firmware.elf. The target MCU is nRF54L15_M33. Start a debugging session for me.",
+      "expected_output": "Should enumerate probes with 'gdb-cli jlink devices' when the serial/nickname is uncertain, then use 'gdb-cli jlink -d nRF54L15_M33 --select usb=<selector> --binary ./firmware.elf --gdb-path <arm-none-eabi-gdb>' (never bare --select usb), and proceed with the returned session_id",
+      "files": [],
+      "assertions": []
+    },
+    {
+      "id": 5,
+      "name": "jlink-select-safety",
+      "prompt": "Start debugging my embedded board. I have two J-Link probes plugged in, just use any of them.",
+      "expected_output": "Must NOT start with bare '--select usb' or 'usb=*'; must run 'gdb-cli jlink devices' and ask the user which probe (serial/nickname) to use, explaining the selector is required to avoid a GUI dialog",
+      "files": [],
+      "assertions": []
+    },
+    {
+      "id": 6,
+      "name": "embedded-hardfault",
+      "prompt": "My Cortex-M firmware crashed into the HardFault handler. I have a jlink session (session_id abc12345) and the ELF symbols loaded. Help me find the faulting code.",
+      "expected_output": "Should inspect pc/lr/xpsr registers, backtrace, NVIC fault status registers (0xE000ED28) or SCB->CFSR, and disassemble around PC to identify the faulting instruction",
+      "files": [],
+      "assertions": []
+    },
+    {
+      "id": 7,
+      "name": "jlink-cleanup",
+      "prompt": "I'm done debugging my board. Clean up everything — stop the debugging session and the J-Link GDB server.",
+      "expected_output": "Should use 'gdb-cli jlink stop --all' (or --jlink-id) which stops the GDB session AND the JLinkGDBServer, and verify no leftover instances; plain 'gdb-cli stop -s <id>' alone is insufficient for this request",
+      "files": [],
+      "assertions": []
     }
   ]
 }

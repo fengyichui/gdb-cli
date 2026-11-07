@@ -6,10 +6,13 @@ description: |
   Use this skill when the user wants to:
   - Analyze core dumps or crash dumps
   - Debug running processes with GDB attach
+  - Debug embedded targets (Cortex-M, ARM, RISC-V) via J-Link probes
   - Investigate crashes, deadlocks, or memory issues
   - Get intelligent debugging assistance with source code context
 
   Requires: gdb-cli (pip install gdb-cli) and GDB 9.0+ with Python support.
+  For embedded J-Link debugging: JLinkGDBServer + arm-none-eabi-gdb (or the
+  matching cross GDB) with Python support.
 ---
 
 # GDB Debug Skill
@@ -38,10 +41,69 @@ gdb -nx -q -batch -ex "python print('OK')"
 
 If gdb-cli is not installed, guide the user: `pip install git+https://github.com/Cerdore/gdb-cli.git`
 
+For embedded J-Link debugging, also check (Step 0 below): JLinkGDBServer on
+PATH and a cross GDB (e.g. arm-none-eabi-gdb) with Python support.
+
 ## Workflow
 
-### Step 1: Initialize Debug Session
+### Step 0: Embedded Targets via J-Link (optional)
 
+For embedded debugging (Cortex-M/ARM/RISC-V boards behind a SEGGER J-Link
+probe), `gdb-cli jlink` manages the whole chain: it auto-starts
+JLinkGDBServer, auto-connects the GDB session, and verifies the session is
+`ready` before returning. One command replaces "start server + connect GDB":
+
+```bash
+# Enumerate locally attached USB probes (get serial numbers / nicknames)
+gdb-cli jlink devices
+
+# USB probe: one command -> GDBServer + GDB session (returns session_id)
+gdb-cli jlink -d <device_name> --select usb=<serial_or_nickname> \
+    --binary <firmware.elf> \
+    --gdb-path /opt/arm-none-eabi-gdb/bin/arm-none-eabi-gdb
+
+# Remote probe via J-Link Remote Server
+gdb-cli jlink -d <device_name> --select ip=<host>:<port> \
+    --binary <firmware.elf> \
+    --gdb-path /opt/arm-none-eabi-gdb/bin/arm-none-eabi-gdb
+
+# Lifecycle
+gdb-cli jlink status                                  # list managed servers (+ session binding)
+gdb-cli jlink restart                                 # restart server + reconnect GDB session
+gdb-cli jlink stop --all                              # stop GDB session + server, clean up
+```
+
+**Critical rules for `--select`:**
+- `usb` MUST carry a selector: `usb=<serial>` or `usb=<nickname>` (from
+  `jlink devices`). Bare `usb` or `usb=*` is rejected — with multiple probes
+  attached, an unselected start would pop a GUI dialog on the host.
+- `ip=<host>:<port>` for remote probes (e.g. `ip=172.25.176.1:19025`).
+- `-d/--device` is the target MCU name J-Link knows (e.g. `nRF54L15_M33`,
+  `STM32F407VG`). Wrong names fail fast with the GDBServer log tail.
+- Always pass `--gdb-path` pointing at a cross GDB (e.g. arm-none-eabi-gdb)
+  — the host `gdb` cannot speak these targets. `--binary <fw.elf>` loads
+  symbols so function names, types and source lines resolve.
+- Fixed internal defaults: `-if SWD -nolocalhostonly -halt -nosilent -vd
+  -noir -notimeout`, `-nogui` always forced, `-port` auto-picked. Extra
+  JLinkGDBServer args pass through `--extra-arg` (e.g. `--extra-arg -rtos
+  --extra-arg FreeRTOS`), but `-select/-port/-device/-if/-gui/-nogui` are
+  reserved.
+- `jlink stop` stops the GDB session AND the server. Plain
+  `gdb-cli stop --session <id>` stops only the GDB session and keeps the
+  server listening (useful to reconnect quickly with `gdb-cli target`).
+- On success the output contains BOTH `jlink_id` and `session_id`. Any
+  failure exits non-zero with the reason (e.g. GDBServer log tail for a bad
+  device name) and leaves no orphan processes.
+
+Then continue with Step 2 below using the returned `session_id`. Embedded
+notes: registers are architecture-aware (`pc/sp/lr/xpsr` on Cortex-M);
+`eval` does not auto-dereference pointers by default (MMIO-safe) — use
+`eval --deref` to opt in; the J-Link `monitor` commands (reset/go/halt/
+regs) are available via `gdb-cli exec -s $SESSION "monitor reset"`; to
+leave the target running when stopping, use
+`gdb-cli stop -s $SESSION --before-detach "monitor go"`.
+
+### Step 1: Initialize Debug Session
 **For debugging a binary file through a target running on a remote host and port**
 ```bash
 gdb-cli target --binary <binary_path> --remote <host_name>:<port_number> [--gdb-path <gdb_path>]
@@ -65,7 +127,7 @@ For `load`, the command may return immediately with `"status": "loading"` while 
 gdb-cli status -s $SESSION
 ```
 
-Wait until the response includes `"state": "ready"` before running heavier inspection commands like `bt`, `threads`, or `eval-cmd`.
+Wait until the response includes `"state": "ready"` before running heavier inspection commands like `bt`, `threads`, or `eval`.
 
 ### Step 2: Gather Initial Information
 
@@ -88,7 +150,7 @@ gdb-cli registers -s $SESSION
 For each frame in the backtrace:
 1. **Extract frame info**: `{file}:{line} in {function}`
 2. **Read source context**: Use `Read` tool to get ±20 lines around the crash point
-3. **Get local variables**: `gdb-cli locals-cmd -s $SESSION --frame <N>`
+3. **Get local variables**: `gdb-cli locals -s $SESSION --frame <N>`
 4. **Analyze**: Correlate code logic with variable values
 
 **Example correlation:**
@@ -111,8 +173,8 @@ Use additional commands based on findings:
 
 ```bash
 # Examine variables
-gdb-cli eval-cmd -s $SESSION "variable_name"
-gdb-cli eval-cmd -s $SESSION "ptr->field"
+gdb-cli eval -s $SESSION "variable_name"
+gdb-cli eval -s $SESSION "ptr->field"
 gdb-cli ptype -s $SESSION "struct_name"
 
 # Memory inspection
@@ -177,7 +239,7 @@ main() → init() → worker() → process_data() → 💥 CRASH
 
 1. Check why `get_node()` returned NULL:
    ```bash
-   gdb-cli eval-cmd -s $SESSION "get_node(id)"
+   gdb-cli eval -s $SESSION "get_node(id)"
    ```
 
 2. Verify the input parameters...
@@ -198,7 +260,7 @@ main() → init() → worker() → process_data() → 💥 CRASH
 **Investigation:**
 ```bash
 gdb-cli registers -s $SESSION  # Check if RIP points to valid code
-gdb-cli eval-cmd -s $SESSION "ptr"  # Check pointer value
+gdb-cli eval -s $SESSION "ptr"  # Check pointer value
 ```
 
 ### Pattern: Deadlock
@@ -242,6 +304,28 @@ gdb-cli threads -s $SESSION
 gdb-cli thread-apply -s $SESSION locals --all
 ```
 
+### Pattern: Embedded Target HardFault (Cortex-M)
+
+**Indicators:**
+- Embedded session (jlink/target mode), PC in `HardFault_Handler` or at a
+  garbage address, xPSR shows exception state
+
+**Investigation:**
+```bash
+gdb-cli registers -s $SESSION --names "pc,sp,lr,xpsr"   # exception state
+gdb-cli bt -s $SESSION                                    # faulting chain
+gdb-cli memory -s $SESSION "0xE000ED28" --size 16        # NVIC CFSR/HFSR
+gdb-cli disasm -s $SESSION --count 12                    # faulting instruction
+gdb-cli eval -s $SESSION "SCB->CFSR"                     # with CMSIS headers
+```
+
+Reset or resume the target through the J-Link monitor channel:
+
+```bash
+gdb-cli exec -s $SESSION "monitor reset"                 # reset + halt
+gdb-cli exec -s $SESSION "monitor regs"                  # all core registers
+```
+
 ## Session Management
 
 ```bash
@@ -253,6 +337,13 @@ gdb-cli status -s $SESSION
 
 # Stop session (cleanup)
 gdb-cli stop -s $SESSION
+
+# Stop session and leave the target running (embedded)
+gdb-cli stop -s $SESSION --before-detach "monitor go"
+
+# J-Link lifecycle (see Step 0): stop session AND server, or restart both
+gdb-cli jlink stop --all
+gdb-cli jlink restart
 ```
 
 ## Tips
