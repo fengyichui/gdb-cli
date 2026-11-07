@@ -19,6 +19,20 @@ from .session import SessionMeta, create_session
 # GDB Server 脚本路径
 GDB_SERVER_SCRIPT = Path(__file__).parent / "gdb_server" / "gdb_rpc_server.py"
 
+# How long to wait for the RPC server socket to appear. This is deliberately
+# independent of the heartbeat timeout: startup is bounded, while the idle
+# heartbeat is a user-facing policy.
+SOCKET_WAIT_TIMEOUT = 30.0
+
+# GDB's own permission switches, mapped to the three safety levels. These give
+# GDB-level enforcement on top of the RPC handler filtering, so read-only mode
+# cannot be bypassed through raw `print`/`eval` expressions.
+_SAFETY_PERMISSIONS = {
+    "readonly": ("off", "off", "off"),
+    "readwrite": ("on", "on", "off"),
+    "full": ("on", "on", "on"),
+}
+
 
 class GDBLauncherError(Exception):
     """启动器错误"""
@@ -101,6 +115,8 @@ def launch_core(
         "set print elements 0",
         "set confirm off",
     ]
+    # Core dumps are never writable: enforce readonly at the GDB level.
+    gdb_commands.extend(_safety_commands("readonly"))
 
     # sysroot / solib-prefix
     # NOTE: `set` takes the rest of the line literally; single quotes would
@@ -131,7 +147,7 @@ def launch_core(
         gdb_args.extend(["-ex", cmd])
 
     # 启动进程
-    _start_gdb_process(gdb_args, session, timeout=float(timeout))
+    _start_gdb_process(gdb_args, session, timeout=SOCKET_WAIT_TIMEOUT)
     gdb_process = GDBProcess(session)
     gdb_process._process = session._gdb_process
     return gdb_process
@@ -186,6 +202,7 @@ def launch_attach(
         "set print elements 0",
         "set confirm off",
     ]
+    gdb_commands.extend(_safety_commands(session.safety_level))
 
     # non-stop 模式
     if non_stop:
@@ -216,7 +233,7 @@ def launch_attach(
         gdb_args.extend(["-ex", cmd])
 
     # 启动进程
-    _start_gdb_process(gdb_args, session, timeout=float(timeout))
+    _start_gdb_process(gdb_args, session, timeout=SOCKET_WAIT_TIMEOUT)
     gdb_process = GDBProcess(session)
     gdb_process._process = session._gdb_process
     return gdb_process
@@ -225,27 +242,33 @@ def launch_attach(
 def launch_target(
     remote: str,
     binary: Optional[str] = None,
-    scheduler_locking: bool = True,
+    scheduler_locking: bool = False,
     non_stop: bool = False,
     timeout: int = 600,
     allow_write: bool = False,
     allow_call: bool = False,
-    gdb_path: str = "gdb"
+    gdb_path: str = "gdb",
+    remote_mode: str = "extended-remote"
 ) -> GDBProcess:
     """
     Args:
         remote: host:port
         binary: 可执行文件路径 (可选)
-        scheduler_locking: 是否启用 scheduler-locking
+        scheduler_locking: 是否启用 scheduler-locking (默认关闭，裸机 remote 常不支持)
         non_stop: 是否启用 non-stop 模式
         timeout: 心跳超时秒数
         allow_write: 是否允许内存修改
         allow_call: 是否允许函数调用
         gdb_path: GDB 可执行文件路径
+        remote_mode: "remote" | "extended-remote"
 
     Returns:
         GDBProcess 实例
     """
+    # `target` 子命令只有这两种模式；非法值回退到 extended-remote。
+    if remote_mode not in ("remote", "extended-remote"):
+        remote_mode = "extended-remote"
+
     # 创建 session
     safety_level = "full" if (allow_write or allow_call) else "readonly"
     if allow_write and not allow_call:
@@ -265,6 +288,7 @@ def launch_target(
         "set print elements 0",
         "set confirm off",
     ]
+    gdb_commands.extend(_safety_commands(session.safety_level))
 
     # non-stop 模式
     if non_stop:
@@ -278,7 +302,9 @@ def launch_target(
 
     # Target: `target` takes the rest of the line literally, so the address
     # must NOT be quoted (GDB would resolve the quotes as part of the hostname).
-    gdb_commands.append(f"target extended-remote {_gdb_rest_of_line(remote)}")
+    gdb_commands.append(
+        f"target {remote_mode} {_gdb_rest_of_line(remote)}"
+    )
 
     # scheduler-locking
     if scheduler_locking:
@@ -294,10 +320,25 @@ def launch_target(
         gdb_args.extend(["-ex", cmd])
 
     # 启动进程
-    _start_gdb_process(gdb_args, session, timeout=float(timeout))
+    _start_gdb_process(gdb_args, session, timeout=SOCKET_WAIT_TIMEOUT)
     gdb_process = GDBProcess(session)
     gdb_process._process = session._gdb_process
     return gdb_process
+
+
+def _safety_commands(safety_level: str) -> List[str]:
+    """Return the GDB permission commands for a safety level.
+
+    Unknown levels fall back to the strictest (readonly) set.
+    """
+    memory, registers, functions = _SAFETY_PERMISSIONS.get(
+        safety_level, _SAFETY_PERMISSIONS["readonly"]
+    )
+    return [
+        f"set may-write-memory {memory}",
+        f"set may-write-registers {registers}",
+        f"set may-call-functions {functions}",
+    ]
 
 
 def _build_server_commands(session: SessionMeta) -> List[str]:
@@ -311,6 +352,7 @@ def _build_server_commands(session: SessionMeta) -> List[str]:
         "remote": session.remote,
         "sock_path": str(session.sock_path),
         "started_at": session.started_at,
+        "safety_level": session.safety_level,
     }
 
     # 序列化 session 元数据
@@ -359,12 +401,50 @@ def _gdb_rest_of_line(arg: str) -> str:
     return arg
 
 
+def _terminate_process(process: Optional[subprocess.Popen],
+                       timeout: float = 5.0) -> None:
+    """Best-effort termination of a GDB process that failed to start.
+
+    Sends SIGTERM, waits up to `timeout` seconds, then escalates to SIGKILL.
+    Never raises: this runs on the startup-failure path.
+    """
+    if process is None:
+        return
+
+    try:
+        if process.poll() is not None:
+            return
+    except Exception:
+        return
+
+    try:
+        process.terminate()
+        process.wait(timeout=timeout)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+    except Exception:
+        pass
+
+    try:
+        process.kill()
+    except Exception:
+        pass
+    try:
+        process.wait(timeout=1.0)
+    except Exception:
+        pass
+
+
 def _start_gdb_process(
     gdb_args: List[str],
     session: SessionMeta,
-    timeout: float = 300.0
+    timeout: float = SOCKET_WAIT_TIMEOUT
 ) -> subprocess.Popen:
     """启动 GDB 进程"""
+    process: Optional[subprocess.Popen] = None
+    fifo_path = None
+    fifo_fd = None
     try:
         # 创建 named FIFO 作为 GDB stdin，使 GDB 阻塞在读而不退出
         # FIFO 持久化在 session 目录中，不依赖父进程的 fd 生命周期
@@ -380,39 +460,51 @@ def _start_gdb_process(
         # 所以用 O_RDWR 打开 FIFO，这样不会阻塞也不会产生 EOF
         fifo_fd = os.open(str(fifo_path), os.O_RDWR | os.O_NONBLOCK)
 
+        # Capture both streams in gdb.log so warnings printed on stdout and
+        # async output are not lost.
         log_path = session_dir / "gdb.log"
         with open(log_path, "w") as log_fd:
             process = subprocess.Popen(
                 gdb_args,
                 stdin=fifo_fd,
-                stdout=subprocess.DEVNULL,
+                stdout=log_fd,
                 stderr=log_fd,
                 start_new_session=True,  # 创建新的进程组
             )
 
         # 关闭父进程持有的 fd（子进程已继承）
         os.close(fifo_fd)
+        fifo_fd = None
 
-        # 更新 session 中的 GDB PID 并持久化
+        # 更新 session 中的 GDB PID / 启动时间并持久化
         session.gdb_pid = process.pid
-        from .session import _write_meta
+        from .session import _read_proc_starttime, _write_meta
+        session.gdb_start_time = _read_proc_starttime(process.pid)
         _write_meta(session)
 
         # _gdb_process 是运行时属性，不持久化到 meta.json。
         # 从磁盘恢复的 session 不会拥有该属性 —— 可通过 gdb_pid 查询进程状态。
         session._gdb_process = process
 
-        # 等待 socket 文件创建
+        # 等待 socket 文件创建（使用独立的启动超时，而不是心跳超时）
         _wait_for_socket(Path(session.sock_path), timeout=timeout, process=process)
+
+        # RPC 握手：确认 target/attach/加载真的成功（server 会在
+        # set_ready 时把连接失败标记为 error）。
+        _verify_session_ready(session)
 
         return process
 
     except FileNotFoundError:
+        _terminate_process(process)
         _cleanup_fifo_if_exists(fifo_path)
         raise GDBLauncherError(f"GDB not found: {gdb_args[0]}")
     except Exception as e:
+        # Roll back a successfully spawned process before cleaning up, so a
+        # failed startup does not leak a running GDB.
+        _terminate_process(process)
         _cleanup_fifo_if_exists(fifo_path)
-        if 'fifo_fd' in locals():
+        if fifo_fd is not None:
             try:
                 os.close(fifo_fd)
             except Exception:
@@ -433,6 +525,32 @@ def _wait_for_socket(sock_path: Path, timeout: float = 30.0,
             return
         time.sleep(0.1)
     raise GDBLauncherError(f"Timeout waiting for socket: {sock_path}")
+
+
+def _verify_session_ready(session: SessionMeta) -> None:
+    """Handshake with the freshly started RPC server and check the session state.
+
+    The server marks itself as "error" when target connection / attach /
+    file+core loading failed (see GDBRPCServer.set_ready).  This makes the
+    failure visible at launch time instead of reporting "started".
+    """
+    from .client import GDBClient, GDBClientError
+
+    try:
+        with GDBClient(str(session.sock_path), timeout=5.0) as client:
+            status = client.call("status", timeout=5.0)
+    except GDBClientError:
+        # Socket not ready yet: the load may still be in progress (async
+        # load flow).  Leave the session as-is; `gdb-cli status` will show
+        # loading/error.
+        return
+
+    state = status.get("state")
+    if state == "error":
+        reason = status.get("error_reason") or "initialization failed"
+        raise GDBLauncherError(
+            f"GDB session failed to initialize: {reason}"
+        )
 
 
 def _check_process_exists(pid: int) -> bool:

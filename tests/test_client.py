@@ -141,6 +141,51 @@ class TestGDBClientContextManager(unittest.TestCase):
         mock_sock.close.assert_called_once()
 
 
+class TestGDBClientConvenienceMethods(unittest.TestCase):
+    """The CLI/e2e surface relies on these convenience wrappers."""
+
+    def setUp(self):
+        self.client = GDBClient("/tmp/test.sock")
+
+    def test_ptype_sends_ptype_command(self):
+        with patch.object(GDBClient, "call", return_value={}) as mock_call:
+            self.client.ptype("struct foo")
+
+        mock_call.assert_called_once_with("ptype", expr="struct foo")
+
+    def test_sharedlibs_sends_sharedlibs_command(self):
+        with patch.object(GDBClient, "call", return_value={}) as mock_call:
+            self.client.sharedlibs()
+
+        mock_call.assert_called_once_with("sharedlibs")
+
+    def test_disasm_sends_expected_params(self):
+        with patch.object(GDBClient, "call", return_value={}) as mock_call:
+            self.client.disasm(start="main", count=5, thread_id=2, frame=1)
+
+        mock_call.assert_called_once_with(
+            "disasm", start="main", count=5, frame=1, thread_id=2
+        )
+
+    def test_disasm_omits_none_start_and_thread(self):
+        with patch.object(GDBClient, "call", return_value={}) as mock_call:
+            self.client.disasm()
+
+        mock_call.assert_called_once_with("disasm", count=20, frame=0)
+
+    def test_eval_forwards_deref(self):
+        with patch.object(GDBClient, "call", return_value={}) as mock_call:
+            self.client.eval("ptr", deref=True)
+
+        mock_call.assert_called_once_with(
+            "eval",
+            expr="ptr",
+            max_depth=3,
+            max_elements=50,
+            deref=True,
+        )
+
+
 class TestGDBCommandError(unittest.TestCase):
     """Test GDBCommandError class."""
 

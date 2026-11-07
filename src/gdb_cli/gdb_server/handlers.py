@@ -59,6 +59,7 @@ if _safety_path.exists():
             _safety_spec.loader.exec_module(_safety)
             SafetyFilter = _safety.SafetyFilter
             SafetyLevel = _safety.SafetyLevel
+            check_wrapped_command = _safety.check_wrapped_command
             SAFETY_AVAILABLE = True
         except Exception:
             SAFETY_AVAILABLE = False
@@ -70,6 +71,7 @@ def handle_eval(
     expr: str,
     max_depth: int = DEFAULT_MAX_DEPTH,
     max_elements: int = DEFAULT_MAX_ELEMENTS,
+    deref: bool = False,
     **kwargs
 ) -> dict:
     """
@@ -79,6 +81,7 @@ def handle_eval(
         expr: 要求值的表达式
         max_depth: 递归深度限制
         max_elements: 数组元素限制
+        deref: Whether to auto-dereference pointers (default False).
 
     Returns:
         {
@@ -91,11 +94,19 @@ def handle_eval(
     if not GDB_AVAILABLE:
         return {"error": "GDB not available"}
 
+    # Write/call enforcement for eval is done at the GDB level via
+    # `set may-write-memory off` / `set may-call-functions off`, injected by
+    # the launcher. Expression parsing is deliberately not attempted here.
     try:
         val = gdb.parse_and_eval(expr)
         return {
             "expression": expr,
-            **format_value_for_display(val, max_depth=max_depth, max_elements=max_elements)
+            **format_value_for_display(
+                val,
+                max_depth=max_depth,
+                max_elements=max_elements,
+                auto_deref=deref,
+            )
         }
     except gdb.error as e:
         return {"expression": expr, "error": f"GDB error: {e}"}
@@ -196,6 +207,21 @@ def _parse_range(range_str: str) -> Tuple[int, int]:
         return (0, 20)  # 默认返回前 20 个
 
 
+def _find_sal(frame: 'gdb.Frame'):
+    """Return the frame's source location, or None when unavailable.
+
+    ``gdb.Frame.sal()`` does not exist; the real API is ``find_sal()``.  Fall
+    back to None on older GDB versions that lack ``find_sal`` so callers can
+    simply omit file/line instead of raising.
+    """
+    try:
+        if not hasattr(frame, 'find_sal'):
+            return None
+        return frame.find_sal()
+    except Exception:
+        return None
+
+
 def _get_thread_state(thread: 'gdb.InferiorThread') -> str:
     """获取线程状态"""
     try:
@@ -233,18 +259,22 @@ def _format_thread(thread: 'gdb.InferiorThread') -> dict:
             # 切换到该线程获取帧信息
             orig_thread = gdb.selected_thread()
             thread.switch()
-
-            frame = gdb.newest_frame()
-            if frame:
-                result["frame"] = {
-                    "function": frame.name() or "??",
-                    "file": frame.sal().symtab.filename if frame.sal().symtab else None,
-                    "line": frame.sal().line if frame.sal() else None
-                }
-
-            # 切回原线程
-            if orig_thread:
-                orig_thread.switch()
+            try:
+                frame = gdb.newest_frame()
+                if frame:
+                    sal = _find_sal(frame)
+                    result["frame"] = {
+                        "function": frame.name() or "??",
+                        "file": sal.symtab.filename if sal and sal.symtab else None,
+                        "line": sal.line if sal else None
+                    }
+            finally:
+                # Always restore, even when frame inspection raises.
+                if orig_thread:
+                    try:
+                        orig_thread.switch()
+                    except Exception:
+                        pass
         except Exception:
             pass
 
@@ -281,6 +311,8 @@ def handle_backtrace(
     if not GDB_AVAILABLE:
         return {"error": "GDB not available"}
 
+    orig_thread = None
+    orig_frame = None
     try:
         orig_thread = gdb.selected_thread()
         orig_frame = gdb.selected_frame()
@@ -328,15 +360,6 @@ def handle_backtrace(
             frame_info["number"] = start + i
             frames_data.append(frame_info)
 
-        # 恢复原线程和帧
-        try:
-            if orig_thread:
-                orig_thread.switch()
-            if orig_frame:
-                orig_frame.select()
-        except Exception:
-            pass
-
         result: dict = {
             "frames": frames_data,
             "total_count": total_count,
@@ -363,6 +386,15 @@ def handle_backtrace(
         return {"error": f"GDB error: {e}"}
     except Exception as e:
         return {"error": str(e)}
+    finally:
+        # Always restore the original thread/frame, even on error paths.
+        try:
+            if orig_thread:
+                orig_thread.switch()
+            if orig_frame:
+                orig_frame.select()
+        except Exception:
+            pass
 
 
 def _format_frame(frame: 'gdb.Frame', include_locals: bool = False) -> dict:
@@ -375,7 +407,7 @@ def _format_frame(frame: 'gdb.Frame', include_locals: bool = False) -> dict:
 
     # 源文件位置
     try:
-        sal = frame.sal()
+        sal = _find_sal(frame)
         if sal and sal.symtab:
             result["file"] = sal.symtab.filename
             result["line"] = sal.line
@@ -505,36 +537,28 @@ def handle_locals(
     if not GDB_AVAILABLE:
         return {"error": "GDB not available"}
 
+    orig_thread = None
+    orig_frame = None
     try:
         orig_thread = gdb.selected_thread()
         orig_frame = gdb.selected_frame()
 
         # 切换到指定线程
         if thread_id is not None:
-            try:
-                target_thread = None
-                for t in gdb.selected_inferior().threads():
-                    if t.num == thread_id:
-                        target_thread = t
-                        break
-                if target_thread:
-                    target_thread.switch()
-            except Exception:
-                pass
+            target_thread = None
+            for t in gdb.selected_inferior().threads():
+                if t.num == thread_id:
+                    target_thread = t
+                    break
+            if target_thread:
+                target_thread.switch()
+            else:
+                return {"error": "Thread %d not found" % thread_id}
 
         # 选择指定帧（使用帧链遍历，线程安全）
         selected = _select_frame_by_number(frame)
 
         locals_data = handle_locals_internal(selected)
-
-        # 恢复
-        try:
-            if orig_thread:
-                orig_thread.switch()
-            if orig_frame:
-                orig_frame.select()
-        except Exception:
-            pass
 
         return {"locals": locals_data, "frame": frame}
 
@@ -542,6 +566,15 @@ def handle_locals(
         return {"error": f"GDB error: {e}"}
     except Exception as e:
         return {"error": str(e)}
+    finally:
+        # Always restore the original thread/frame, even on error paths.
+        try:
+            if orig_thread:
+                orig_thread.switch()
+            if orig_frame:
+                orig_frame.select()
+        except Exception:
+            pass
 
 
 def handle_locals_internal(frame: 'gdb.Frame') -> List[dict]:
@@ -596,16 +629,22 @@ def handle_exec(
     if not GDB_AVAILABLE:
         return {"error": "GDB not available"}
 
+    # Fail closed: never execute raw commands without the safety module.
+    if not SAFETY_AVAILABLE:
+        return {
+            "error": "safety module unavailable; command refused",
+            "command": command,
+        }
+
     # 使用 SafetyFilter 进行安全检查
-    if SAFETY_AVAILABLE:
-        try:
-            level = SafetyLevel(safety_level)
-        except ValueError:
-            level = SafetyLevel.READONLY
-        sf = SafetyFilter(level)
-        allowed, reason = sf.filter_command(command)
-        if not allowed:
-            return {"error": reason or "Command not allowed", "command": command}
+    try:
+        level = SafetyLevel(safety_level)
+    except ValueError:
+        level = SafetyLevel.READONLY
+    sf = SafetyFilter(level)
+    allowed, reason = sf.filter_command(command)
+    if not allowed:
+        return {"error": reason or "Command not allowed", "command": command}
 
     try:
         # Handlers are already dispatched on the GDB main thread by
@@ -642,7 +681,7 @@ def handle_status(**kwargs) -> dict:
     session_meta = kwargs.get("_session_meta", {})
 
     result: dict = {
-        "state": "ready",
+        "state": kwargs.get("_server_state", "ready"),
         "mode": session_meta.get("mode", "unknown"),
         "binary": session_meta.get("binary"),
         "gdb_pid": session_meta.get("gdb_pid"),
@@ -693,6 +732,7 @@ def handle_eval_element(
     index: int,
     max_depth: int = DEFAULT_MAX_DEPTH,
     max_elements: int = DEFAULT_MAX_ELEMENTS,
+    deref: bool = False,
     **kwargs
 ) -> dict:
     """
@@ -703,6 +743,7 @@ def handle_eval_element(
         index: 元素索引
         max_depth: 递归深度限制
         max_elements: 数组元素限制
+        deref: Whether to auto-dereference pointers (default False).
 
     Returns:
         {"expression": "...", "index": N, "value": ...}
@@ -710,6 +751,9 @@ def handle_eval_element(
     if not GDB_AVAILABLE:
         return {"error": "GDB not available"}
 
+    # Write/call enforcement for eval is done at the GDB level via
+    # `set may-write-memory off` / `set may-call-functions off`, injected by
+    # the launcher. Expression parsing is deliberately not attempted here.
     try:
         # 先求值获取容器
         container = gdb.parse_and_eval(expr)
@@ -717,7 +761,12 @@ def handle_eval_element(
         # 尝试通过索引访问
         try:
             element = container[index]
-            value = format_value_for_display(element, max_depth=max_depth, max_elements=max_elements)
+            value = format_value_for_display(
+                element,
+                max_depth=max_depth,
+                max_elements=max_elements,
+                auto_deref=deref,
+            )
             return {
                 "expression": expr,
                 "index": index,
@@ -737,7 +786,12 @@ def handle_eval_element(
                 ptr = gdb.Value(target_addr).cast(ptr_type)
                 element = ptr.dereference()
 
-                value = format_value_for_display(element, max_depth=max_depth, max_elements=max_elements)
+                value = format_value_for_display(
+                    element,
+                    max_depth=max_depth,
+                    max_elements=max_elements,
+                    auto_deref=deref,
+                )
                 return {
                     "expression": expr,
                     "index": index,
@@ -777,6 +831,13 @@ def handle_thread_apply(
     if not GDB_AVAILABLE:
         return {"error": "GDB not available"}
 
+    # Fail closed: never execute raw commands without the safety module.
+    if not SAFETY_AVAILABLE:
+        return {
+            "error": "safety module unavailable; command refused",
+            "command": command,
+        }
+
     try:
         inferior = gdb.selected_inferior()
         all_threads_list = list(inferior.threads())
@@ -792,42 +853,51 @@ def handle_thread_apply(
             return {"error": "Specify --all or --threads list"}
 
         # 安全检查：使用 SafetyFilter 过滤命令
-        if SAFETY_AVAILABLE:
-            safety_level_str = kwargs.get("safety_level", "readonly")
-            try:
-                level = SafetyLevel(safety_level_str)
-            except ValueError:
-                level = SafetyLevel.READONLY
-            sf = SafetyFilter(level)
-            allowed, reason = sf.filter_command(command)
-            if not allowed:
-                return {"error": reason or "Command not allowed", "command": command}
+        safety_level_str = kwargs.get("safety_level", "readonly")
+        try:
+            level = SafetyLevel(safety_level_str)
+        except ValueError:
+            level = SafetyLevel.READONLY
+        sf = SafetyFilter(level)
+        allowed, reason = sf.filter_command(command)
+        if not allowed:
+            return {"error": reason or "Command not allowed", "command": command}
+
+        # The effective GDB command is `thread apply <threads> <command>`;
+        # validate the wrapped verb too so e.g. `... set $r0=1` is blocked.
+        wrapped_result = check_wrapped_command(command, level)
+        if not wrapped_result.allowed:
+            return {
+                "error": wrapped_result.reason or "Command not allowed",
+                "command": command,
+            }
 
         results = []
         orig_thread = gdb.selected_thread()
 
-        for thread in target_threads:
-            try:
-                thread.switch()
-                output = gdb.execute(command, to_string=True)
-                results.append({
-                    "thread_id": thread.num,
-                    "command": command,
-                    "output": output or "(no output)"
-                })
-            except Exception as e:
-                results.append({
-                    "thread_id": thread.num,
-                    "command": command,
-                    "error": str(e)
-                })
-
-        # 恢复原线程
-        if orig_thread:
-            try:
-                orig_thread.switch()
-            except Exception:
-                pass
+        try:
+            for thread in target_threads:
+                try:
+                    thread.switch()
+                    output = gdb.execute(command, to_string=True)
+                    results.append({
+                        "thread_id": thread.num,
+                        "command": command,
+                        "output": output or "(no output)"
+                    })
+                except Exception as e:
+                    results.append({
+                        "thread_id": thread.num,
+                        "command": command,
+                        "error": str(e)
+                    })
+        finally:
+            # 恢复原线程
+            if orig_thread:
+                try:
+                    orig_thread.switch()
+                except Exception:
+                    pass
 
         return {
             "results": results,
@@ -859,6 +929,8 @@ def handle_args(
     if not GDB_AVAILABLE:
         return {"error": "GDB not available"}
 
+    orig_thread = None
+    orig_frame = None
     try:
         orig_thread = gdb.selected_thread()
         orig_frame = gdb.selected_frame()
@@ -913,6 +985,15 @@ def handle_args(
         return {"error": f"GDB error: {e}"}
     except Exception as e:
         return {"error": str(e)}
+    finally:
+        # Always restore the original thread/frame, even on error paths.
+        try:
+            if orig_thread:
+                orig_thread.switch()
+            if orig_frame:
+                orig_frame.select()
+        except Exception:
+            pass
 
 
 # 常用寄存器（按目标架构）。嵌入式目标（ARM/AArch64）与原生 x86_64 的
@@ -933,14 +1014,32 @@ _AARCH64_DEFAULT_REGS = (
 def _default_register_names(selected_frame: 'gdb.Frame') -> List[str]:
     """Return a curated default register list for the frame's architecture."""
     try:
-        arch_name = selected_frame.architecture().name().lower()
+        arch = selected_frame.architecture()
+    except Exception:
+        arch = None
+
+    try:
+        arch_name = arch.name().lower() if arch is not None else ""
     except Exception:
         arch_name = ""
 
-    if arch_name == "arm":
-        return _ARM_DEFAULT_REGS
-    if arch_name == "aarch64":
+    # Embedded GDB reports variants such as "armv7e-m" / "armv8-m.main".
+    if arch_name.startswith("aarch64"):
         return _AARCH64_DEFAULT_REGS
+    if arch_name.startswith("arm"):
+        return _ARM_DEFAULT_REGS
+
+    # Unknown architecture: enumerate the registers GDB actually exposes
+    # instead of silently returning the x86 list.
+    if arch is not None:
+        try:
+            names = [reg.name for reg in list(arch.registers())][:40]
+            if names:
+                return names
+        except Exception:
+            pass
+
+    # Last resort.
     return _X86_DEFAULT_REGS
 
 
@@ -964,6 +1063,8 @@ def handle_registers(
     if not GDB_AVAILABLE:
         return {"error": "GDB not available"}
 
+    orig_thread = None
+    orig_frame = None
     try:
         orig_thread = gdb.selected_thread()
         orig_frame = gdb.selected_frame()
@@ -992,6 +1093,7 @@ def handle_registers(
             reg_names = _default_register_names(selected)
 
         regs_data = []
+        read_ok = 0
         for name in reg_names:
             try:
                 val = selected.read_register(name)
@@ -1000,11 +1102,29 @@ def handle_registers(
                     "value": hex(int(val)),
                     "decimal": int(val)
                 })
+                read_ok += 1
             except Exception as e:
                 if explicit_names:
                     regs_data.append({"name": name, "error": str(e)})
 
-        # 恢复
+        result: dict = {"registers": regs_data, "frame": frame}
+        if not explicit_names and read_ok == 0:
+            try:
+                arch_name = selected.architecture().name()
+            except Exception:
+                arch_name = "unknown"
+            result["error"] = (
+                "no readable registers for architecture '%s'" % arch_name
+            )
+
+        return result
+
+    except gdb.error as e:
+        return {"error": f"GDB error: {e}"}
+    except Exception as e:
+        return {"error": str(e)}
+    finally:
+        # Always restore the original thread/frame, even on error paths.
         try:
             if orig_thread:
                 orig_thread.switch()
@@ -1012,13 +1132,6 @@ def handle_registers(
                 orig_frame.select()
         except Exception:
             pass
-
-        return {"registers": regs_data, "frame": frame}
-
-    except gdb.error as e:
-        return {"error": f"GDB error: {e}"}
-    except Exception as e:
-        return {"error": str(e)}
 
 
 def handle_memory(
@@ -1291,9 +1404,20 @@ def handle_disasm(
     if not GDB_AVAILABLE:
         return {"error": "GDB not available"}
 
+    if count <= 0:
+        return {"error": "count must be positive"}
+
+    orig_thread = None
+    orig_frame = None
     try:
-        orig_thread = gdb.selected_thread()
-        orig_frame = gdb.selected_frame()
+        try:
+            orig_thread = gdb.selected_thread()
+        except Exception:
+            orig_thread = None
+        try:
+            orig_frame = gdb.selected_frame()
+        except Exception:
+            orig_frame = None
 
         # 切换线程
         if thread_id is not None:
@@ -1307,9 +1431,30 @@ def handle_disasm(
             else:
                 return {"error": "Thread %d not found" % thread_id}
 
-        # 选择帧
-        selected = _select_frame_by_number(frame)
-        arch = selected.architecture()
+        # Prefer the selected frame for architecture, but an explicit --start
+        # must also work when no frame is selected (target/ELF loaded, no
+        # stopped thread).
+        selected = None
+        arch = None
+        try:
+            selected = _select_frame_by_number(frame)
+            arch = selected.architecture()
+        except Exception:
+            selected = None
+
+        if arch is None:
+            try:
+                inferior = gdb.selected_inferior()
+                if hasattr(inferior, "architecture"):
+                    arch = inferior.architecture()
+            except Exception:
+                arch = None
+
+        if arch is None:
+            return {
+                "error": "Cannot determine architecture: no frame selected "
+                         "and inferior architecture unavailable"
+            }
 
         # 确定起始地址
         if start:
@@ -1326,9 +1471,17 @@ def handle_disasm(
                 except Exception as e:
                     return {"error": f"Cannot resolve address '{start}': {e}"}
         else:
+            if selected is None:
+                return {"error": "No frame selected; specify --start"}
             start_pc = selected.pc()
 
-        func_name = selected.name() or "??"
+        if selected is not None:
+            try:
+                func_name = selected.name() or "??"
+            except Exception:
+                func_name = "??"
+        else:
+            func_name = "??"
 
         # 限制数量
         if count > 200:
@@ -1345,15 +1498,6 @@ def handle_disasm(
                 "length": insn.get("length", 0)
             })
 
-        # 恢复
-        try:
-            if orig_thread:
-                orig_thread.switch()
-            if orig_frame:
-                orig_frame.select()
-        except Exception:
-            pass
-
         result = {
             "instructions": insn_data,
             "function": func_name,
@@ -1361,9 +1505,13 @@ def handle_disasm(
             "count": len(insn_data)
         }
 
-        if len(insn_data) >= count:
-            last_addr = instructions[-1]["addr"]
-            result["hint"] = "use 'disasm --start 0x%x' to continue" % (last_addr + 1)
+        if len(insn_data) >= count and instructions:
+            last = instructions[-1]
+            # Thumb instructions are 2 or 4 bytes; point the hint at the real
+            # next instruction rather than the second byte of this one.
+            last_len = last.get("length", 0) or 1
+            next_addr = last["addr"] + last_len
+            result["hint"] = "use 'disasm --start 0x%x' to continue" % next_addr
 
         return result
 
@@ -1371,3 +1519,12 @@ def handle_disasm(
         return {"error": f"GDB error: {e}"}
     except Exception as e:
         return {"error": str(e)}
+    finally:
+        # Always restore the original thread/frame, even on error paths.
+        try:
+            if orig_thread:
+                orig_thread.switch()
+            if orig_frame:
+                orig_frame.select()
+        except Exception:
+            pass

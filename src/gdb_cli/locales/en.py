@@ -28,11 +28,22 @@ ENGLISH_CATALOG = {
     "cli.attach.allow_write_help": "Allow memory modification",
     "cli.attach.allow_call_help": "Allow function calls",
 
+    # === target command ===
+    "cli.target.remote_help": "Remote target address (host:port or [ipv6]:port)",
+    "cli.target.binary_help": "Executable file path (optional)",
+    "cli.target.remote_mode_help": "Remote connection mode (remote/extended-remote)",
+    "cli.target.scheduler_locking_help": "Enable scheduler-locking",
+    "cli.target.non_stop_help": "Enable non-stop mode",
+    "cli.target.timeout_help": "Heartbeat timeout in seconds (default: 600)",
+    "cli.target.allow_write_help": "Allow memory modification",
+    "cli.target.allow_call_help": "Allow function calls",
+
     # === eval-cmd command ===
     "cli.eval_cmd.doc": "Evaluate C/C++ expression",
     "cli.eval_cmd.session_help": "Session ID",
     "cli.eval_cmd.max_depth_help": "Recursion depth limit",
     "cli.eval_cmd.max_elements_help": "Array element limit",
+    "cli.eval_cmd.deref_help": "Automatically dereference pointer values",
 
     # === threads command ===
     "cli.threads.doc": "List threads",
@@ -71,6 +82,8 @@ ENGLISH_CATALOG = {
         "GDB command(s) to run before detaching, newline-separated "
         "(e.g. 'monitor go' to leave the target running)"
     ),
+    "cli.stop.force_help": "Force-kill the GDB process if the RPC stop fails",
+    "cli.stop.cleanup_failed": "Failed to clean up session: {session_id}",
 
     # === sessions command ===
     "cli.sessions.doc": "List all active sessions",
@@ -186,6 +199,7 @@ ENGLISH_CATALOG = {
     "cli.target.session_reused_message": "Session already exists for this remote",
     "cli.target.failed": "Failed to connect to target",
     "cli.status.gdb_loading_message": "GDB process alive, not yet responding",
+    "cli.status.gdb_unresponsive_message": "GDB process alive but no longer responding",
     "cli.status.session_dead": "Session dead",
     "cli.status.gdb_process_dead": "GDB process {pid} no longer exists",
     "cli.thread_apply.require_target": "Must specify --all or --threads",

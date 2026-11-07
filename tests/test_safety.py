@@ -12,6 +12,7 @@ from gdb_cli.safety import (
     FORBIDDEN_COMMANDS,
     SafetyFilter,
     SafetyLevel,
+    check_wrapped_command,
     classify_command,
     is_command_allowed,
 )
@@ -247,9 +248,78 @@ class TestSafetyEdgeCases(unittest.TestCase):
         expected = {"bt", "backtrace", "info", "thread", "threads",
                      "print", "p", "x", "ptype", "whatis",
                      "frame", "up", "down", "select-frame",
-                     "list", "disassemble", "source",
+                     "list", "disassemble",
                      "show", "help", "pwd", "directory"}
         self.assertEqual(READONLY_COMMANDS, expected)
+        self.assertNotIn("source", READONLY_COMMANDS)
+
+
+class TestMultilineAndSource(unittest.TestCase):
+    """Multi-line commands and `source` must always be rejected."""
+
+    def test_multiline_rejected_at_all_levels(self):
+        for level in SafetyLevel:
+            sf = SafetyFilter(level)
+            for cmd in ("bt\nshell ls", "print x\r\nset $r0=1", "bt\rfoo"):
+                with self.subTest(level=level, command=cmd):
+                    result = sf.check_command(cmd)
+                    self.assertFalse(result.allowed)
+                    self.assertEqual(
+                        result.reason, "multi-line commands are not allowed"
+                    )
+
+    def test_multiline_rejected_by_filter_command(self):
+        sf = SafetyFilter(SafetyLevel.FULL)
+        allowed, reason = sf.filter_command("bt\npython print(1)")
+        self.assertFalse(allowed)
+        self.assertEqual(reason, "multi-line commands are not allowed")
+
+    def test_source_blocked_at_all_levels(self):
+        for level in SafetyLevel:
+            for cmd in ("source /tmp/evil.gdb", "source"):
+                with self.subTest(level=level, command=cmd):
+                    self.assertFalse(
+                        is_command_allowed(cmd, level.value),
+                        f"'{cmd}' should be blocked at {level}",
+                    )
+                    self.assertEqual(
+                        classify_command(cmd), "forbidden"
+                    )
+
+
+class TestWrappedCommand(unittest.TestCase):
+    """`thread apply ... <cmd>` must be checked by the wrapped verb."""
+
+    def test_thread_apply_set_rejected(self):
+        result = check_wrapped_command(
+            "thread apply all set $r0=1", SafetyLevel.READONLY
+        )
+        self.assertFalse(result.allowed)
+        self.assertEqual(result.category, "write")
+
+    def test_thread_apply_set_rejected_in_readwrite(self):
+        result = check_wrapped_command(
+            "thread apply all set $r0=1", "readwrite"
+        )
+        self.assertTrue(result.allowed)
+
+    def test_thread_apply_bt_allowed(self):
+        result = check_wrapped_command(
+            "thread apply all bt", SafetyLevel.READONLY
+        )
+        self.assertTrue(result.allowed)
+        self.assertEqual(result.category, "readonly")
+
+    def test_thread_apply_shell_rejected(self):
+        result = check_wrapped_command(
+            "thread apply 1,3 shell ls", SafetyLevel.FULL
+        )
+        self.assertFalse(result.allowed)
+
+    def test_check_command_also_unwraps(self):
+        sf = SafetyFilter(SafetyLevel.READONLY)
+        self.assertFalse(sf.check_command("thread apply all set $r0=1").allowed)
+        self.assertTrue(sf.check_command("thread apply all bt").allowed)
 
 
 if __name__ == "__main__":

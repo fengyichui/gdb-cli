@@ -189,7 +189,13 @@ def attach(
 @main.command()
 @click.option("--remote", "-r", required=True, type=str, help=t("cli.target.remote_help"))
 @click.option("--binary", "-b", help=t("cli.target.binary_help"))
-@click.option("--scheduler-locking/--no-scheduler-locking", default=True, help=t("cli.target.scheduler_locking_help"))
+@click.option(
+    "--remote-mode",
+    type=click.Choice(["remote", "extended-remote"]),
+    default="extended-remote",
+    help=t("cli.target.remote_mode_help"),
+)
+@click.option("--scheduler-locking/--no-scheduler-locking", default=False, help=t("cli.target.scheduler_locking_help"))
 @click.option("--non-stop/--no-non-stop", default=False, help=t("cli.target.non_stop_help"))
 @click.option("--timeout", default=600, help=t("cli.target.timeout_help"))
 @click.option("--allow-write", is_flag=True, help=t("cli.target.allow_write_help"))
@@ -198,6 +204,7 @@ def attach(
 def target(
     remote: str,
     binary: Optional[str],
+    remote_mode: str,
     scheduler_locking: bool,
     non_stop: bool,
     timeout: int,
@@ -206,7 +213,8 @@ def target(
     gdb_path: str,
 ) -> None:
     """Connect to remote GDB server"""
-    if not re.match(r'^[\w.-]+:\d+$', remote):
+    # host:port, or a bracketed IPv6 address such as [::1]:2331.
+    if not re.match(r'^(?:[\w.-]+|\[[0-9A-Fa-f:.]+\]):\d+$', remote):
         print_error(t("cli.target.invalid_format", remote=remote))
         raise click.exceptions.Exit(1)
 
@@ -225,6 +233,7 @@ def target(
         gdb_process = launch_target(
             remote=remote,
             binary=binary,
+            remote_mode=remote_mode,
             scheduler_locking=scheduler_locking,
             non_stop=non_stop,
             timeout=timeout,
@@ -256,14 +265,27 @@ def target(
 @click.argument("expr")
 @click.option("--max-depth", default=3, help=t("cli.eval_cmd.max_depth_help"))
 @click.option("--max-elements", default=50, help=t("cli.eval_cmd.max_elements_help"))
-def eval_cmd(session: str, expr: str, max_depth: int, max_elements: int) -> None:
+@click.option("--deref", is_flag=True, help=t("cli.eval_cmd.deref_help"))
+def eval_cmd(
+    session: str,
+    expr: str,
+    max_depth: int,
+    max_elements: int,
+    deref: bool,
+) -> None:
     """Evaluate C/C++ expression"""
     try:
         with get_client(session) as client:
-            result = client.eval(expr, max_depth=max_depth, max_elements=max_elements)
+            result = client.eval(
+                expr,
+                max_depth=max_depth,
+                max_elements=max_elements,
+                deref=deref,
+            )
             print_json(result)
     except GDBCommandError as e:
         print_error(str(e), expr)
+        raise click.exceptions.Exit(1)
     except GDBClientError as e:
         print_error(t("errors.connection_error"), str(e))
         raise click.exceptions.Exit(1)
@@ -282,6 +304,7 @@ def threads(session: str, range_str: Optional[str], limit: int, filter_state: Op
             print_json(result)
     except GDBCommandError as e:
         print_error(str(e))
+        raise click.exceptions.Exit(1)
     except GDBClientError as e:
         print_error(t("errors.connection_error"), str(e))
         raise click.exceptions.Exit(1)
@@ -306,6 +329,7 @@ def bt(session: str, thread_id: Optional[int], limit: int, full: bool, range_str
             print_json(result)
     except GDBCommandError as e:
         print_error(str(e))
+        raise click.exceptions.Exit(1)
     except GDBClientError as e:
         print_error(t("errors.connection_error"), str(e))
         raise click.exceptions.Exit(1)
@@ -322,6 +346,7 @@ def frame_cmd(session: str, number: int) -> None:
             print_json(result)
     except GDBCommandError as e:
         print_error(str(e))
+        raise click.exceptions.Exit(1)
     except GDBClientError as e:
         print_error(t("errors.connection_error"), str(e))
         raise click.exceptions.Exit(1)
@@ -339,6 +364,7 @@ def locals_cmd(session: str, thread_id: Optional[int], frame: int) -> None:
             print_json(result)
     except GDBCommandError as e:
         print_error(str(e))
+        raise click.exceptions.Exit(1)
     except GDBClientError as e:
         print_error(t("errors.connection_error"), str(e))
         raise click.exceptions.Exit(1)
@@ -355,6 +381,7 @@ def exec_cmd(session: str, command: str) -> None:
             print_json(result)
     except GDBCommandError as e:
         print_error(str(e), command)
+        raise click.exceptions.Exit(1)
     except GDBClientError as e:
         print_error(t("errors.connection_error"), str(e))
         raise click.exceptions.Exit(1)
@@ -363,33 +390,54 @@ def exec_cmd(session: str, command: str) -> None:
 @main.command()
 @click.option("--session", "-s", required=True, help=t("cli.stop.session_help"))
 @click.option("--before-detach", help=t("cli.stop.before_detach_help"))
-def stop(session: str, before_detach: Optional[str]) -> None:
+@click.option("--force", is_flag=True, help=t("cli.stop.force_help"))
+def stop(session: str, before_detach: Optional[str], force: bool) -> None:
     """Stop session and safely exit GDB"""
     try:
         # 发送停止命令；Server 先 detach，再在响应返回后退出 GDB
         with get_client(session) as client:
             result = client.call("stop", before_detach=before_detach or "")
+    except GDBClientError as e:
+        if not force:
+            print_error(t("errors.connection_error"), str(e))
+            raise click.exceptions.Exit(1)
 
+        # Explicit --force: fall back to the old hard cleanup path.
         from .session import cleanup_session
-        cleanup_session(session)
-
-        output = {
-            "session_id": session,
-            "status": "stopped",
-            "detached": bool(result.get("detached")),
-        }
-        if result.get("errors"):
-            output["detach_errors"] = result["errors"]
-        print_json(output)
-
-    except GDBClientError:
-        # 强制清理
-        from .session import cleanup_session
-        cleanup_session(session)
+        if not cleanup_session(session):
+            print_error(t("cli.stop.cleanup_failed", session_id=session), session)
+            raise click.exceptions.Exit(1)
         print_json({
             "session_id": session,
             "status": "force_stopped"
         })
+        return
+
+    # Graceful path: give the GDB process time to exit on its own before
+    # falling back to cleanup_session (which sends SIGTERM/SIGKILL).
+    meta = get_session(session)
+    if meta is not None and meta.gdb_pid:
+        deadline = time.time() + 5.0
+        while time.time() < deadline:
+            try:
+                os.kill(meta.gdb_pid, 0)
+            except OSError:
+                break
+            time.sleep(0.1)
+
+    from .session import cleanup_session
+    if not cleanup_session(session):
+        print_error(t("cli.stop.cleanup_failed", session_id=session), session)
+        raise click.exceptions.Exit(1)
+
+    output = {
+        "session_id": session,
+        "status": "stopped",
+        "detached": bool(result.get("detached")),
+    }
+    if result.get("errors"):
+        output["detach_errors"] = result["errors"]
+    print_json(output)
 
 
 @main.command()
@@ -454,11 +502,21 @@ def status(session: str) -> None:
             try:
                 os.kill(meta.gdb_pid, 0)
                 elapsed = time.time() - meta.started_at
-                result = {
-                    "session_id": session,
-                    "state": "loading",
-                    "message": t("cli.status.gdb_loading_message")
-                }
+                if elapsed > 120:
+                    # A live process that still cannot answer after two minutes
+                    # is no longer plausibly "loading".
+                    result = {
+                        "session_id": session,
+                        "state": "unresponsive",
+                        "message": t("cli.status.gdb_unresponsive_message"),
+                        "error": str(e),
+                    }
+                else:
+                    result = {
+                        "session_id": session,
+                        "state": "loading",
+                        "message": t("cli.status.gdb_loading_message"),
+                    }
                 result["elapsed"] = _format_elapsed(elapsed)
                 print_json(result)
                 return
@@ -483,6 +541,7 @@ def eval_element_cmd(session: str, expr: str, index: int, max_depth: int) -> Non
             print_json(result)
     except GDBCommandError as e:
         print_error(str(e), f"{expr}[{index}]")
+        raise click.exceptions.Exit(1)
     except GDBClientError as e:
         print_error(t("errors.connection_error"), str(e))
         raise click.exceptions.Exit(1)
@@ -509,6 +568,7 @@ def thread_apply_cmd(session: str, command: str, threads: Optional[str], all_thr
             print_json(result)
     except GDBCommandError as e:
         print_error(str(e), command)
+        raise click.exceptions.Exit(1)
     except GDBClientError as e:
         print_error(t("errors.connection_error"), str(e))
         raise click.exceptions.Exit(1)
@@ -529,6 +589,7 @@ def args(session: str, thread_id: Optional[int], frame: int) -> None:
             print_json(result)
     except GDBCommandError as e:
         print_error(str(e))
+        raise click.exceptions.Exit(1)
     except GDBClientError as e:
         print_error(t("errors.connection_error"), str(e))
         raise click.exceptions.Exit(1)
@@ -552,6 +613,7 @@ def registers(session: str, names: Optional[str], thread_id: Optional[int], fram
             print_json(result)
     except GDBCommandError as e:
         print_error(str(e))
+        raise click.exceptions.Exit(1)
     except GDBClientError as e:
         print_error(t("errors.connection_error"), str(e))
         raise click.exceptions.Exit(1)
@@ -570,6 +632,7 @@ def memory(session: str, address: str, size: int, fmt: str) -> None:
             print_json(result)
     except GDBCommandError as e:
         print_error(str(e), address)
+        raise click.exceptions.Exit(1)
     except GDBClientError as e:
         print_error(t("errors.connection_error"), str(e))
         raise click.exceptions.Exit(1)
@@ -586,6 +649,7 @@ def ptype(session: str, expr: str) -> None:
             print_json(result)
     except GDBCommandError as e:
         print_error(str(e), expr)
+        raise click.exceptions.Exit(1)
     except GDBClientError as e:
         print_error(t("errors.connection_error"), str(e))
         raise click.exceptions.Exit(1)
@@ -602,6 +666,7 @@ def thread_switch_cmd(session: str, thread_id: int) -> None:
             print_json(result)
     except GDBCommandError as e:
         print_error(str(e))
+        raise click.exceptions.Exit(1)
     except GDBClientError as e:
         print_error(t("errors.connection_error"), str(e))
         raise click.exceptions.Exit(1)
@@ -618,6 +683,7 @@ def frame_up_cmd(session: str, count: int) -> None:
             print_json(result)
     except GDBCommandError as e:
         print_error(str(e))
+        raise click.exceptions.Exit(1)
     except GDBClientError as e:
         print_error(t("errors.connection_error"), str(e))
         raise click.exceptions.Exit(1)
@@ -634,6 +700,7 @@ def frame_down_cmd(session: str, count: int) -> None:
             print_json(result)
     except GDBCommandError as e:
         print_error(str(e))
+        raise click.exceptions.Exit(1)
     except GDBClientError as e:
         print_error(t("errors.connection_error"), str(e))
         raise click.exceptions.Exit(1)
@@ -649,6 +716,7 @@ def sharedlibs(session: str) -> None:
             print_json(result)
     except GDBCommandError as e:
         print_error(str(e))
+        raise click.exceptions.Exit(1)
     except GDBClientError as e:
         print_error(t("errors.connection_error"), str(e))
         raise click.exceptions.Exit(1)
@@ -673,6 +741,7 @@ def disasm(session: str, start: Optional[str], count: int, thread_id: Optional[i
             print_json(result)
     except GDBCommandError as e:
         print_error(str(e))
+        raise click.exceptions.Exit(1)
     except GDBClientError as e:
         print_error(t("errors.connection_error"), str(e))
         raise click.exceptions.Exit(1)

@@ -180,9 +180,21 @@ class GDBClient:
 
     # ============ 便捷方法 ============
 
-    def eval(self, expr: str, max_depth: int = 3, max_elements: int = 50) -> dict:
+    def eval(
+        self,
+        expr: str,
+        max_depth: int = 3,
+        max_elements: int = 50,
+        deref: bool = False,
+    ) -> dict:
         """求值表达式"""
-        return self.call("eval", expr=expr, max_depth=max_depth, max_elements=max_elements)
+        return self.call(
+            "eval",
+            expr=expr,
+            max_depth=max_depth,
+            max_elements=max_elements,
+            deref=deref,
+        )
 
     def threads(
         self,
@@ -228,6 +240,31 @@ class GDBClient:
     def status(self) -> dict:
         """获取状态"""
         return self.call("status")
+
+    def ptype(self, expr: str) -> dict:
+        """View type information for an expression."""
+        return self.call("ptype", expr=expr)
+
+    def disasm(
+        self,
+        start: Optional[str] = None,
+        count: int = 20,
+        thread_id: Optional[int] = None,
+        frame: int = 0,
+        **kwargs,
+    ) -> dict:
+        """Disassemble instructions around a location."""
+        params: dict = {"count": count, "frame": frame}
+        if start is not None:
+            params["start"] = start
+        if thread_id is not None:
+            params["thread_id"] = thread_id
+        params.update(kwargs)
+        return self.call("disasm", **params)
+
+    def sharedlibs(self) -> dict:
+        """List loaded shared libraries."""
+        return self.call("sharedlibs")
 
     def __enter__(self) -> 'GDBClient':
         self.connect()

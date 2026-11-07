@@ -7,7 +7,7 @@ Safety Module - 命令安全过滤
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional, Set, Tuple
+from typing import Any, Optional, Set, Tuple
 
 
 class SafetyLevel(Enum):
@@ -31,7 +31,7 @@ READONLY_COMMANDS: Set[str] = {
     "bt", "backtrace", "info", "thread", "threads",
     "print", "p", "x", "ptype", "whatis",
     "frame", "up", "down", "select-frame",
-    "list", "disassemble", "source",
+    "list", "disassemble",
     "show", "help", "pwd", "directory",
 }
 
@@ -60,6 +60,8 @@ CALL_COMMANDS: Set[str] = {
 FORBIDDEN_COMMANDS: Set[str] = {
     "quit", "kill", "shell", "python-interactive", "python",
     "signal", "detach", "attach", "target",
+    # `source` executes an arbitrary script file, so it must never be allowed.
+    "source",
 }
 
 # 命令别名映射
@@ -90,6 +92,22 @@ class SafetyFilter:
         Returns:
             CommandCheckResult 检查结果
         """
+        # Reject multi-line input: a second line would bypass the verb check
+        # entirely because only the first token is inspected below.
+        if "\n" in command or "\r" in command:
+            return CommandCheckResult(
+                allowed=False,
+                category="forbidden",
+                reason="multi-line commands are not allowed"
+            )
+
+        # `thread apply ... <cmd>` runs <cmd> on multiple threads, so the
+        # wrapped command must be filtered by its own verb rather than by the
+        # harmless `thread` wrapper.
+        wrapped = _extract_wrapped_command(command)
+        if wrapped is not None:
+            return self.check_command(wrapped)
+
         # 提取命令动词
         cmd_verb = self._extract_command_verb(command)
         cmd_lower = cmd_verb.lower()
@@ -191,6 +209,54 @@ class SafetyFilter:
         """
         result = self.check_command(command)
         return result.allowed, result.reason
+
+
+def _extract_wrapped_command(command: str) -> Optional[str]:
+    """Return the trailing command of ``thread apply ... <cmd>``.
+
+    Returns ``None`` when *command* is not a ``thread apply`` wrapper.  The
+    returned value may be an empty string (wrapper without a command), which
+    the normal safety check then rejects.
+    """
+    parts = command.strip().split()
+    if (
+        len(parts) >= 3
+        and parts[0].lower() in ("thread", "threads")
+        and parts[1].lower() == "apply"
+    ):
+        return " ".join(parts[3:])
+    return None
+
+
+def check_wrapped_command(apply_cmd: str, level: Any) -> CommandCheckResult:
+    """Check the command wrapped by ``thread apply ... <cmd>``.
+
+    Args:
+        apply_cmd: A full ``thread apply ... <cmd>`` string, or just the
+            trailing command on its own.
+        level: A :class:`SafetyLevel` or its string value.
+
+    Returns:
+        CommandCheckResult for the effective command.
+    """
+    if isinstance(level, str):
+        try:
+            safety_level = SafetyLevel(level)
+        except ValueError:
+            safety_level = SafetyLevel.READONLY
+    else:
+        safety_level = level
+
+    if "\n" in apply_cmd or "\r" in apply_cmd:
+        return CommandCheckResult(
+            allowed=False,
+            category="forbidden",
+            reason="multi-line commands are not allowed"
+        )
+
+    wrapped = _extract_wrapped_command(apply_cmd)
+    target = wrapped if wrapped is not None else apply_cmd
+    return SafetyFilter(safety_level).check_command(target)
 
 
 def is_command_allowed(command: str, level: str = "readonly") -> bool:

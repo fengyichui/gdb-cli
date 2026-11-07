@@ -7,6 +7,7 @@ import os
 import sys
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock
 
 # Mock gdb module before any imports that depend on it
@@ -312,6 +313,312 @@ class TestHandleStatus(unittest.TestCase):
         result = self.handlers.handle_status(_session_meta=session_meta)
         self.assertIn("mode", result)
         self.assertEqual(result["mode"], "core")
+
+    def test_status_honors_server_state(self):
+        result = self.handlers.handle_status(_server_state="busy")
+        self.assertEqual(result["state"], "busy")
+
+    def test_status_defaults_to_ready(self):
+        result = self.handlers.handle_status()
+        self.assertEqual(result["state"], "ready")
+
+
+# --- Strict API-shape fakes -------------------------------------------------
+# MagicMock hid the frame.sal() bug because it fabricates any attribute.  The
+# fakes below expose only real GDB API methods.
+
+class _Symtab:
+    filename = "foo.c"
+
+
+class _Sal:
+    symtab = _Symtab()
+    line = 42
+
+
+class _StrictFrame:
+    """Exposes only the real frame API used by _format_frame()."""
+
+    def __init__(self, sal=None):
+        self._sal = sal
+
+    def name(self):
+        return "main"
+
+    def pc(self):
+        return 0x1000
+
+    def find_sal(self):
+        return self._sal
+
+    def block(self):
+        return None
+
+
+class _OldFrame:
+    """Old-GDB shape: no find_sal() method at all."""
+
+    def name(self):
+        return "main"
+
+    def pc(self):
+        return 0x1000
+
+    def block(self):
+        return None
+
+
+class _Reg:
+    def __init__(self, name):
+        self.name = name
+
+
+class _Arch:
+    def __init__(self, name, regs=None, insns=None):
+        self._name = name
+        self._regs = regs or []
+        self._insns = insns or []
+
+    def name(self):
+        return self._name
+
+    def registers(self):
+        return iter(self._regs)
+
+    def disassemble(self, start, count=None):
+        return self._insns[:count] if count else self._insns
+
+
+class _ArchFrame:
+    def __init__(self, arch):
+        self._arch = arch
+
+    def architecture(self):
+        return self._arch
+
+    def name(self):
+        return "main"
+
+    def pc(self):
+        return 0x1000
+
+
+class _RegisterFrame:
+    def __init__(self, arch):
+        self._arch = arch
+
+    def architecture(self):
+        return self._arch
+
+    def read_register(self, name):
+        raise RuntimeError("register unavailable: %s" % name)
+
+
+class _DisasmFrame:
+    def __init__(self, arch):
+        self._arch = arch
+
+    def architecture(self):
+        return self._arch
+
+    def name(self):
+        return "main"
+
+    def pc(self):
+        return 0x1000
+
+
+class TestFindSal(unittest.TestCase):
+    """frame.find_sal() must be used; frame.sal() does not exist."""
+
+    def setUp(self):
+        import importlib
+
+        import gdb_cli.gdb_server.handlers as handlers_mod
+        importlib.reload(handlers_mod)
+        self.handlers = handlers_mod
+
+    def test_format_frame_uses_find_sal(self):
+        result = self.handlers._format_frame(_StrictFrame(sal=_Sal()))
+        self.assertEqual(result["file"], "foo.c")
+        self.assertEqual(result["line"], 42)
+
+    def test_format_frame_omits_location_without_find_sal(self):
+        result = self.handlers._format_frame(_OldFrame())
+        self.assertNotIn("file", result)
+        self.assertNotIn("line", result)
+        self.assertEqual(result["function"], "main")
+
+
+class TestThreadRestore(unittest.TestCase):
+    """Selection must be restored in a finally block even on errors."""
+
+    def setUp(self):
+        import importlib
+
+        import gdb_cli.gdb_server.handlers as handlers_mod
+        importlib.reload(handlers_mod)
+        self.handlers = handlers_mod
+        self.gdb = sys.modules["gdb"]
+        # A real exception class is needed for `except gdb.error`.
+        self.gdb.error = RuntimeError
+
+    def test_locals_restores_selection_on_exception(self):
+        orig_thread = Mock()
+        orig_frame = Mock()
+        target_thread = Mock()
+        target_thread.num = 7
+        inferior = Mock()
+        inferior.threads.return_value = [target_thread]
+        self.gdb.selected_thread = Mock(return_value=orig_thread)
+        self.gdb.selected_frame = Mock(return_value=orig_frame)
+        self.gdb.selected_inferior = Mock(return_value=inferior)
+
+        self.handlers._select_frame_by_number = Mock(
+            side_effect=RuntimeError("boom")
+        )
+
+        result = self.handlers.handle_locals(thread_id=7)
+
+        self.assertIn("error", result)
+        orig_thread.switch.assert_called()
+        orig_frame.select.assert_called()
+
+
+class TestDefaultRegisterArchVariants(unittest.TestCase):
+    """ARM arch names are variant strings, not exactly 'arm'."""
+
+    def setUp(self):
+        import importlib
+
+        import gdb_cli.gdb_server.handlers as handlers_mod
+        importlib.reload(handlers_mod)
+        self.handlers = handlers_mod
+
+    def test_armv7e_m_uses_arm_list(self):
+        names = self.handlers._default_register_names(
+            _ArchFrame(_Arch("armv7e-m"))
+        )
+        self.assertIn("r0", names)
+        self.assertIn("xpsr", names)
+        self.assertNotIn("rax", names)
+
+    def test_armv8_m_main_uses_arm_list(self):
+        names = self.handlers._default_register_names(
+            _ArchFrame(_Arch("armv8-m.main"))
+        )
+        self.assertIn("r0", names)
+        self.assertIn("pc", names)
+        self.assertNotIn("rax", names)
+
+    def test_unknown_arch_enumerates_registers(self):
+        arch = _Arch("riscv:rv32", regs=[_Reg("pc"), _Reg("ra"), _Reg("sp")])
+        names = self.handlers._default_register_names(_ArchFrame(arch))
+        self.assertEqual(names, ["pc", "ra", "sp"])
+
+
+class TestRegistersNoReadable(unittest.TestCase):
+    def setUp(self):
+        import importlib
+
+        import gdb_cli.gdb_server.handlers as handlers_mod
+        importlib.reload(handlers_mod)
+        self.handlers = handlers_mod
+        self.gdb = sys.modules["gdb"]
+        self.gdb.error = RuntimeError
+
+    def test_all_failed_reads_surface_top_level_error(self):
+        arch = _Arch("armv7e-m")
+        self.gdb.selected_thread = Mock(return_value=Mock())
+        self.gdb.selected_frame = Mock(return_value=Mock())
+        self.handlers._select_frame_by_number = Mock(
+            return_value=_RegisterFrame(arch)
+        )
+
+        result = self.handlers.handle_registers()
+
+        self.assertIn("error", result)
+        self.assertIn("no readable registers", result["error"])
+        self.assertIn("armv7e-m", result["error"])
+
+
+class TestDisasm(unittest.TestCase):
+    def setUp(self):
+        import importlib
+
+        import gdb_cli.gdb_server.handlers as handlers_mod
+        importlib.reload(handlers_mod)
+        self.handlers = handlers_mod
+        self.gdb = sys.modules["gdb"]
+        self.gdb.error = RuntimeError
+        self.gdb.selected_thread = Mock(return_value=Mock())
+        self.gdb.selected_frame = Mock(return_value=Mock())
+
+    def _arch(self):
+        return _Arch(
+            "armv7e-m",
+            insns=[
+                {"addr": 0x1000, "asm": "nop", "length": 2},
+                {"addr": 0x1002, "asm": "nop", "length": 2},
+            ],
+        )
+
+    def test_hint_uses_addr_plus_length(self):
+        self.handlers._select_frame_by_number = Mock(
+            return_value=_DisasmFrame(self._arch())
+        )
+        result = self.handlers.handle_disasm(start="0x1000", count=2)
+        self.assertIn("hint", result)
+        self.assertIn("0x1004", result["hint"])
+        self.assertNotIn("0x1003", result["hint"])
+
+    def test_non_positive_count_rejected(self):
+        for bad in (0, -1):
+            with self.subTest(count=bad):
+                result = self.handlers.handle_disasm(start="0x1000", count=bad)
+                self.assertEqual(result["error"], "count must be positive")
+
+    def test_explicit_start_without_frame(self):
+        # Simulate: no selected frame, but inferior architecture available.
+        self.handlers._select_frame_by_number = Mock(
+            side_effect=RuntimeError("No frame is currently selected.")
+        )
+        self.gdb.selected_frame = Mock(return_value=None)
+        self.gdb.selected_inferior = Mock(
+            return_value=SimpleNamespace(architecture=lambda: self._arch())
+        )
+
+        result = self.handlers.handle_disasm(start="0x1000", count=2)
+
+        self.assertIn("instructions", result)
+        self.assertEqual(result["function"], "??")
+        self.assertEqual(result["count"], 2)
+
+
+class TestSafetyFailClosed(unittest.TestCase):
+    """Handlers must refuse commands when the safety module is unavailable."""
+
+    def setUp(self):
+        import importlib
+
+        import gdb_cli.gdb_server.handlers as handlers_mod
+        importlib.reload(handlers_mod)
+        self.handlers = handlers_mod
+        self.handlers.SAFETY_AVAILABLE = False
+
+    def test_exec_fails_closed(self):
+        sys.modules["gdb"].execute = Mock(return_value="ran")
+        result = self.handlers.handle_exec("bt")
+        self.assertIn("error", result)
+        self.assertIn("safety module unavailable", result["error"])
+        sys.modules["gdb"].execute.assert_not_called()
+
+    def test_thread_apply_fails_closed(self):
+        result = self.handlers.handle_thread_apply(
+            command="bt", all_threads=True
+        )
+        self.assertIn("error", result)
+        self.assertIn("safety module unavailable", result["error"])
 
 
 if __name__ == "__main__":

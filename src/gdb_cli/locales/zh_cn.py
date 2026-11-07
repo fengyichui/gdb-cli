@@ -26,11 +26,22 @@ ZH_CN_CATALOG = {
     "cli.attach.allow_write_help": "允许内存修改",
     "cli.attach.allow_call_help": "允许函数调用",
 
+    # === target command ===
+    "cli.target.remote_help": "远程目标地址 (host:port 或 [ipv6]:port)",
+    "cli.target.binary_help": "可执行文件路径 (可选)",
+    "cli.target.remote_mode_help": "远程连接模式 (remote/extended-remote)",
+    "cli.target.scheduler_locking_help": "启用 scheduler-locking",
+    "cli.target.non_stop_help": "启用 non-stop 模式",
+    "cli.target.timeout_help": "心跳超时秒数 (默认 600)",
+    "cli.target.allow_write_help": "允许内存修改",
+    "cli.target.allow_call_help": "允许函数调用",
+
     # === eval-cmd command ===
     "cli.eval_cmd.doc": "求值 C/C++ 表达式",
     "cli.eval_cmd.session_help": "会话 ID",
     "cli.eval_cmd.max_depth_help": "递归深度限制",
     "cli.eval_cmd.max_elements_help": "数组元素限制",
+    "cli.eval_cmd.deref_help": "自动解引用指针值",
 
     # === threads command ===
     "cli.threads.doc": "列出线程",
@@ -69,6 +80,8 @@ ZH_CN_CATALOG = {
         "detach 前执行的 GDB 命令，可多行分隔"
         "（例如 'monitor go' 让目标继续运行）"
     ),
+    "cli.stop.force_help": "RPC 停止失败时强制杀死 GDB 进程",
+    "cli.stop.cleanup_failed": "清理会话失败: {session_id}",
 
     # === sessions command ===
     "cli.sessions.doc": "列出所有活跃会话",
@@ -184,6 +197,7 @@ ZH_CN_CATALOG = {
     "cli.target.session_reused_message": "该远程目标已有会话",
     "cli.target.failed": "连接目标失败",
     "cli.status.gdb_loading_message": "GDB 进程存活，尚未响应",
+    "cli.status.gdb_unresponsive_message": "GDB 进程存活，但已无响应",
     "cli.status.session_dead": "会话已终止",
     "cli.status.gdb_process_dead": "GDB 进程 {pid} 已不存在",
     "cli.thread_apply.require_target": "必须指定 --all 或 --threads",

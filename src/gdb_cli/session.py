@@ -12,6 +12,7 @@ import os
 import shutil
 import signal
 import tempfile
+import threading
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
@@ -20,6 +21,13 @@ from typing import List, Optional
 
 # Session 目录
 SESSION_DIR = Path.home() / ".gdb-cli" / "sessions"
+
+# Serializes session creation so concurrent creators cannot race on metadata.
+_create_lock = threading.Lock()
+
+# Sessions younger than this are not reaped: creation writes meta.json before
+# the GDB PID, so a concurrent creator would otherwise look dead.
+SESSION_CREATION_GRACE = 60.0
 
 
 @dataclass
@@ -32,6 +40,7 @@ class SessionMeta:
     pid: Optional[int] = None          # 目标进程 PID (attach 模式)
     remote: Optional[str] = None       # host:port for target
     gdb_pid: Optional[int] = None      # GDB 进程 PID
+    gdb_start_time: Optional[str] = None  # /proc/<pid>/stat starttime for identity
     sock_path: Optional[str] = None    # Unix Socket 路径
     started_at: float = field(default_factory=time.time)
     last_active: float = field(default_factory=time.time)
@@ -77,7 +86,6 @@ def create_session(
 
     # 创建 session 目录
     session_dir = SESSION_DIR / session_id
-    session_dir.mkdir(parents=True, exist_ok=True)
 
     # Socket 路径
     sock_path = session_dir / "gdb.sock"
@@ -95,8 +103,11 @@ def create_session(
         safety_level=safety_level
     )
 
-    # 写入 meta.json
-    _write_meta(session)
+    with _create_lock:
+        session_dir.mkdir(parents=True, exist_ok=True)
+
+        # 写入 meta.json
+        _write_meta(session)
 
     return session
 
@@ -117,7 +128,9 @@ def _write_meta(session: SessionMeta) -> None:
     except Exception:
         # 清理临时文件
         try:
-            Path(temp_path).unlink(missing_ok=True)
+            Path(temp_path).unlink()
+        except FileNotFoundError:
+            pass
         except Exception:
             pass
         raise
@@ -209,6 +222,56 @@ def _is_session_alive(session: SessionMeta) -> bool:
     return True
 
 
+def _read_proc_starttime(pid: int) -> Optional[str]:
+    """Return /proc/<pid>/stat field 22 (starttime) as a string, or None.
+
+    The comm field (field 2) may contain spaces and parentheses, so parsing
+    resumes after the last ')'.
+    """
+    try:
+        with open(f"/proc/{pid}/stat") as f:
+            data = f.read()
+    except OSError:
+        return None
+
+    rparen = data.rfind(")")
+    if rparen == -1:
+        return None
+
+    # Fields after ')' start at field 3 (state); starttime is field 22.
+    fields = data[rparen + 1:].split()
+    try:
+        return fields[19]
+    except IndexError:
+        return None
+
+
+def _read_proc_comm(pid: int) -> Optional[str]:
+    """Return /proc/<pid>/comm (the executable name) or None."""
+    try:
+        with open(f"/proc/{pid}/comm") as f:
+            return f.read().strip()
+    except OSError:
+        return None
+
+
+def _process_identity_matches(meta: SessionMeta) -> bool:
+    """Check whether meta.gdb_pid still belongs to the GDB we launched.
+
+    Sessions created by older versions have no start time; for those fall
+    back to the weak executable-name check.
+    """
+    if meta.gdb_pid is None:
+        return False
+
+    if meta.gdb_start_time is not None:
+        current = _read_proc_starttime(meta.gdb_pid)
+        return current is not None and current == meta.gdb_start_time
+
+    comm = _read_proc_comm(meta.gdb_pid)
+    return comm is not None and "gdb" in comm.lower()
+
+
 def cleanup_session(session_id: str) -> bool:
     """
     清理会话
@@ -226,24 +289,29 @@ def cleanup_session(session_id: str) -> bool:
     # 读取元数据，尝试杀死 GDB 进程
     meta = _read_meta(session_id)
     if meta and meta.gdb_pid:
-        try:
-            os.kill(meta.gdb_pid, signal.SIGTERM)
-            # 等待进程退出，否则发送 SIGKILL
-            deadline = time.time() + 3.0
-            while time.time() < deadline:
-                try:
-                    os.kill(meta.gdb_pid, 0)
-                    time.sleep(0.1)
-                except OSError:
-                    break  # 进程已退出
-            else:
-                # 超时仍未退出，强制 SIGKILL
-                try:
-                    os.kill(meta.gdb_pid, signal.SIGKILL)
-                except OSError:
-                    pass
-        except OSError:
-            pass
+        # Only signal the process when it is still the one we launched. A
+        # recycled PID (or a process that already exited) must never be killed.
+        if _process_identity_matches(meta):
+            try:
+                os.kill(meta.gdb_pid, signal.SIGTERM)
+                # 等待进程退出，否则发送 SIGKILL
+                deadline = time.time() + 3.0
+                while time.time() < deadline:
+                    try:
+                        os.kill(meta.gdb_pid, 0)
+                        time.sleep(0.1)
+                    except OSError:
+                        break  # 进程已退出
+                else:
+                    # 超时仍未退出，强制 SIGKILL
+                    try:
+                        os.kill(meta.gdb_pid, signal.SIGKILL)
+                    except OSError:
+                        pass
+            except OSError:
+                pass
+        # else: the PID is gone or reused by an unrelated process; do not
+        # signal it. The metadata cleanup below still succeeds.
 
     # 删除目录
     try:
@@ -278,6 +346,11 @@ def cleanup_dead_sessions() -> int:
                 cleaned += 1
             except Exception:
                 pass
+            continue
+
+        # A session that was just created may not have its GDB PID written
+        # yet; leave it alone during the creation grace period.
+        if time.time() - meta.started_at < SESSION_CREATION_GRACE:
             continue
 
         # 检查是否存活

@@ -5,6 +5,7 @@ Value Formatter - gdb.Value → JSON 递归序列化
 支持基本类型、指针、结构体、数组，并提供截断和 hint 功能。
 """
 
+import math
 from typing import Any
 
 # GDB Python API - 仅在 GDB 环境中可用
@@ -43,7 +44,8 @@ def format_gdb_value(
     max_depth: int = DEFAULT_MAX_DEPTH,
     max_elements: int = DEFAULT_MAX_ELEMENTS,
     max_string_len: int = DEFAULT_MAX_STRING_LEN,
-    max_fields: int = DEFAULT_MAX_FIELDS
+    max_fields: int = DEFAULT_MAX_FIELDS,
+    auto_deref: bool = True
 ) -> Any:
     """
     递归将 gdb.Value 转为 JSON-safe Python 对象
@@ -55,6 +57,9 @@ def format_gdb_value(
         max_elements: 数组/容器最大元素数
         max_string_len: 字符串最大长度
         max_fields: 结构体最大字段数
+        auto_deref: When False, pointers are not dereferenced and C strings
+            are not read from target memory.  This avoids side-effect reads
+            on MMIO addresses.
 
     Returns:
         JSON-safe Python 对象:
@@ -88,7 +93,16 @@ def format_gdb_value(
     elif target_type.code == gdb.TYPE_CODE_BOOL:
         return bool(val)
     elif target_type.code == gdb.TYPE_CODE_FLT:
-        return float(val)
+        # NaN/Inf are not valid JSON when dumps() uses its defaults.
+        try:
+            value = float(val)
+        except Exception:
+            return _safe_str(val)
+        if not math.isfinite(value):
+            if math.isnan(value):
+                return {"special": "nan"}
+            return {"special": "inf" if value > 0 else "-inf"}
+        return value
     elif target_type.code == gdb.TYPE_CODE_VOID:
         return None
     elif target_type.code == gdb.TYPE_CODE_ENUM:
@@ -98,15 +112,22 @@ def format_gdb_value(
     elif target_type.code == gdb.TYPE_CODE_CHAR:
         return chr(int(val))
     elif target_type.code == gdb.TYPE_CODE_ARRAY:
-        # 检查是否是 char[] (C 字符串)
+        # C `char` reports TYPE_CODE_INT in modern GDB, so match on the
+        # one-byte type named "char" as well as TYPE_CODE_CHAR.
         elem_type = target_type.target()
-        if elem_type and elem_type.code == gdb.TYPE_CODE_CHAR:
+        if _is_c_char_type(elem_type):
             return _format_c_string(val, max_string_len)
-        return _format_array(val, depth, max_depth, max_elements, max_string_len, max_fields)
+        return _format_array(
+            val, depth, max_depth, max_elements, max_string_len, max_fields,
+            auto_deref
+        )
 
     # 指针
     elif target_type.code == gdb.TYPE_CODE_PTR:
-        return _format_pointer(val, depth, max_depth, max_elements, max_string_len, max_fields)
+        return _format_pointer(
+            val, depth, max_depth, max_elements, max_string_len, max_fields,
+            auto_deref
+        )
 
     # 引用
     elif target_type.code == gdb.TYPE_CODE_REF:
@@ -117,14 +138,18 @@ def format_gdb_value(
                 max_depth=max_depth,
                 max_elements=max_elements,
                 max_string_len=max_string_len,
-                max_fields=max_fields
+                max_fields=max_fields,
+                auto_deref=auto_deref
             )
         except Exception:
             return {"type": "reference", "error": "Cannot dereference"}
 
     # 结构体/类
     elif target_type.code in (gdb.TYPE_CODE_STRUCT, gdb.TYPE_CODE_UNION):
-        return _format_struct(val, target_type, depth, max_depth, max_elements, max_string_len, max_fields)
+        return _format_struct(
+            val, target_type, depth, max_depth, max_elements, max_string_len,
+            max_fields, auto_deref
+        )
 
     # 函数指针
     elif target_type.code == gdb.TYPE_CODE_FUNC:
@@ -138,7 +163,8 @@ def format_gdb_value(
             max_depth=max_depth,
             max_elements=max_elements,
             max_string_len=max_string_len,
-            max_fields=max_fields
+            max_fields=max_fields,
+            auto_deref=auto_deref
         )
 
     # 未知类型
@@ -177,12 +203,38 @@ def _format_enum(val: 'gdb.Value', val_type: 'gdb.Type') -> dict:
         return {"type": "enum", "value": int(val)}
 
 
+def _is_c_char_type(elem_type: Any) -> bool:
+    """Return True for C ``char`` element types.
+
+    Modern GDB reports C ``char`` with ``TYPE_CODE_INT`` (verified: code 8 on
+    GDB 15.1/16.3), while older versions used ``TYPE_CODE_CHAR``.  Only accept
+    the integer fallback when the type is a one-byte type literally named
+    ``char`` so plain ``int8_t`` arrays are not mistreated as strings.
+    """
+    if elem_type is None:
+        return False
+    try:
+        code = elem_type.code
+        if code == gdb.TYPE_CODE_CHAR:
+            return True
+        name = elem_type.name
+        return (
+            code == gdb.TYPE_CODE_INT
+            and getattr(elem_type, "sizeof", None) == 1
+            and name == "char"
+        )
+    except Exception:
+        return False
+
+
 def _format_c_string(val: 'gdb.Value', max_len: int) -> str:
     """格式化 C 字符串 (char[])"""
     try:
         # 使用 gdb.execute 获取字符串内容
         # 或者尝试直接转换为 Python string
         result = val.string(encoding="utf-8", errors="replace", length=max_len + 1)
+        # val.string(length=...) reads a fixed length and keeps embedded NULs.
+        result = result.split("\x00", 1)[0]
         if len(result) > max_len:
             return result[:max_len] + "..."
         return result
@@ -211,7 +263,8 @@ def _format_array(
     max_depth: int,
     max_elements: int,
     max_string_len: int,
-    max_fields: int
+    max_fields: int,
+    auto_deref: bool = True
 ) -> dict:
     """格式化数组"""
     try:
@@ -235,7 +288,8 @@ def _format_array(
                     max_depth=max_depth,
                     max_elements=max_elements,
                     max_string_len=max_string_len,
-                    max_fields=max_fields
+                    max_fields=max_fields,
+                    auto_deref=auto_deref
                 ))
             except Exception as e:
                 elements.append({"index": i, "error": str(e)})
@@ -262,7 +316,8 @@ def _format_pointer(
     max_depth: int,
     max_elements: int,
     max_string_len: int,
-    max_fields: int
+    max_fields: int,
+    auto_deref: bool = True
 ) -> dict:
     """格式化指针"""
     try:
@@ -285,10 +340,16 @@ def _format_pointer(
             result["value"] = "void*"
             return result
 
+        # Never touch target memory when auto-deref is disabled: reading a
+        # char* string or dereferencing an MMIO pointer can have side effects.
+        if not auto_deref:
+            return result
+
         # char* 作为字符串处理
         if target_type.code == gdb.TYPE_CODE_CHAR:
             try:
                 str_val = val.string(encoding="utf-8", errors="replace", length=max_string_len)
+                str_val = str_val.split("\x00", 1)[0]
                 if len(str_val) >= max_string_len:
                     str_val = str_val[:max_string_len] + "..."
                 result["string"] = str_val
@@ -306,7 +367,8 @@ def _format_pointer(
                     max_depth=max_depth,
                     max_elements=max_elements,
                     max_string_len=max_string_len,
-                    max_fields=max_fields
+                    max_fields=max_fields,
+                    auto_deref=auto_deref
                 )
             except gdb.MemoryError:
                 result["deref_error"] = "Cannot access memory"
@@ -326,7 +388,8 @@ def _format_struct(
     max_depth: int,
     max_elements: int,
     max_string_len: int,
-    max_fields: int
+    max_fields: int,
+    auto_deref: bool = True
 ) -> dict:
     """格式化结构体/类"""
     try:
@@ -358,7 +421,8 @@ def _format_struct(
                         max_depth=max_depth,
                         max_elements=max_elements,
                         max_string_len=max_string_len,
-                        max_fields=max_fields
+                        max_fields=max_fields,
+                        auto_deref=auto_deref
                     )
                 except Exception as e:
                     fields[field_name] = {"error": str(e)}
@@ -389,10 +453,15 @@ def _format_type_summary(val: 'gdb.Value') -> dict:
 def format_value_for_display(
     val: 'gdb.Value',
     max_depth: int = DEFAULT_MAX_DEPTH,
-    max_elements: int = DEFAULT_MAX_ELEMENTS
+    max_elements: int = DEFAULT_MAX_ELEMENTS,
+    auto_deref: bool = True
 ) -> dict:
     """
     格式化值用于显示，包装为标准响应格式
+
+    Args:
+        auto_deref: When False, pointers are not dereferenced and C strings
+            are not read from target memory.
 
     Returns:
         {
@@ -403,7 +472,10 @@ def format_value_for_display(
         }
     """
     result: dict = {
-        "value": format_gdb_value(val, max_depth=max_depth, max_elements=max_elements),
+        "value": format_gdb_value(
+            val, max_depth=max_depth, max_elements=max_elements,
+            auto_deref=auto_deref
+        ),
         "type": str(val.type) if val.type else "unknown"
     }
 

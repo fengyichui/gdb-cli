@@ -26,11 +26,22 @@ RU_CATALOG = {
     "cli.attach.allow_write_help": "Разрешить изменение памяти",
     "cli.attach.allow_call_help": "Разрешить вызовы функций",
 
+    # === target command ===
+    "cli.target.remote_help": "Адрес удалённой цели (host:port или [ipv6]:port)",
+    "cli.target.binary_help": "Путь к исполняемому файлу (опционально)",
+    "cli.target.remote_mode_help": "Режим удалённого подключения (remote/extended-remote)",
+    "cli.target.scheduler_locking_help": "Включить scheduler-locking",
+    "cli.target.non_stop_help": "Включить режим non-stop",
+    "cli.target.timeout_help": "Таймаут пульса в секундах (по умолчанию: 600)",
+    "cli.target.allow_write_help": "Разрешить изменение памяти",
+    "cli.target.allow_call_help": "Разрешить вызовы функций",
+
     # === eval-cmd command ===
     "cli.eval_cmd.doc": "Вычислить выражение C/C++",
     "cli.eval_cmd.session_help": "ID сессии",
     "cli.eval_cmd.max_depth_help": "Лимит глубины рекурсии",
     "cli.eval_cmd.max_elements_help": "Лимит элементов массива",
+    "cli.eval_cmd.deref_help": "Автоматически разыменовывать указатели",
 
     # === threads command ===
     "cli.threads.doc": "Список потоков",
@@ -69,6 +80,8 @@ RU_CATALOG = {
         "Команды GDB, выполняемые перед detach, по одной на строку "
         "(например, 'monitor go', чтобы оставить цель запущенной)"
     ),
+    "cli.stop.force_help": "Принудительно завершить процесс GDB, если RPC stop не удался",
+    "cli.stop.cleanup_failed": "Не удалось очистить сессию: {session_id}",
 
     # === sessions command ===
     "cli.sessions.doc": "Список всех активных сессий",
@@ -184,6 +197,7 @@ RU_CATALOG = {
     "cli.target.session_reused_message": "Сессия для этой удалённой цели уже существует",
     "cli.target.failed": "Не удалось подключиться к цели",
     "cli.status.gdb_loading_message": "Процесс GDB жив, пока не отвечает",
+    "cli.status.gdb_unresponsive_message": "Процесс GDB жив, но больше не отвечает",
     "cli.status.session_dead": "Сессия завершена",
     "cli.status.gdb_process_dead": "Процесс GDB {pid} больше не существует",
     "cli.thread_apply.require_target": "Необходимо указать --all или --threads",
