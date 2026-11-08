@@ -48,6 +48,16 @@ a vendor cross GDB (e.g. arm-none-eabi-gdb) — with Python support.
 
 ## Workflow
 
+**Choose ONE entry point, then continue with Step 2:**
+- **Step 0** — embedded target behind a J-Link probe: gdb-cli manages
+  everything (starts JLinkGDBServer + creates the GDB session in one
+  command).
+- **Step 1** — everything else: core dump (`load`), local process
+  (`attach`), or connecting to a remote GDB server that ALREADY runs
+  (`target`; e.g. a JLinkGDBServer you started yourself, or one left
+  listening after a jlink session was stopped — reconnect with
+  `gdb-cli target --remote 127.0.0.1:<port>`).
+
 ### Step 0: Embedded Targets via J-Link (optional)
 
 For embedded debugging (Cortex-M/ARM/RISC-V boards behind a SEGGER J-Link
