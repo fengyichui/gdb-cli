@@ -42,28 +42,22 @@ gdb -nx -q -batch -ex "python print('OK')"
 
 If gdb-cli is not installed, guide the user: `pip install git+https://github.com/Cerdore/gdb-cli.git`
 
-For embedded J-Link debugging, also check (Step 0 below): JLinkGDBServer on
+For embedded J-Link debugging, also check (Step 1 below): JLinkGDBServer on
 PATH and a multi-target GDB — the host's `gdb-multiarch` (Debian/Ubuntu) or
 a vendor cross GDB (e.g. arm-none-eabi-gdb) — with Python support.
 
 ## Workflow
 
-**Choose ONE entry point, then continue with Step 2:**
-- **Step 0** — embedded target behind a J-Link probe: gdb-cli manages
-  everything (starts JLinkGDBServer + creates the GDB session in one
-  command).
-- **Step 1** — everything else: core dump (`load`), local process
-  (`attach`), or connecting to a remote GDB server that ALREADY runs
-  (`target`; e.g. a JLinkGDBServer you started yourself, or one left
-  listening after a jlink session was stopped — reconnect with
-  `gdb-cli target --remote 127.0.0.1:<port>`).
+All entry points produce a `session_id`; pick the one matching your target
+and continue with Step 2.
 
-### Step 0: Embedded Targets via J-Link (optional)
+### Step 1: Initialize Debug Session
 
-For embedded debugging (Cortex-M/ARM/RISC-V boards behind a SEGGER J-Link
-probe), `gdb-cli jlink` manages the whole chain: it auto-starts
-JLinkGDBServer, auto-connects the GDB session, and verifies the session is
-`ready` before returning. One command replaces "start server + connect GDB":
+**For an embedded target behind a J-Link probe (Cortex-M/ARM/RISC-V) —
+gdb-cli manages the whole chain:**
+`gdb-cli jlink` auto-starts JLinkGDBServer, auto-connects the GDB session,
+and verifies the session is `ready` before returning. One command replaces
+"start server + connect GDB":
 
 ```bash
 # Enumerate locally attached USB probes (get serial numbers / nicknames)
@@ -111,16 +105,16 @@ gdb-cli jlink stop --all                              # stop GDB session + serve
   failure exits non-zero with the reason (e.g. GDBServer log tail for a bad
   device name) and leaves no orphan processes.
 
-Then continue with Step 2 below using the returned `session_id`. Embedded
-notes: registers are architecture-aware (`pc/sp/lr/xpsr` on Cortex-M);
-`eval` does not auto-dereference pointers by default (MMIO-safe) — use
-`eval --deref` to opt in; the J-Link `monitor` commands (reset/go/halt/
-regs) are available via `gdb-cli exec -s $SESSION "monitor reset"`; to
-leave the target running when stopping, use
-`gdb-cli stop -s $SESSION --before-detach "monitor go"`.
+Embedded notes: registers are architecture-aware (`pc/sp/lr/xpsr` on
+Cortex-M); `eval` does not auto-dereference pointers by default
+(MMIO-safe) — use `eval --deref` to opt in; the J-Link `monitor` commands
+(reset/go/halt/regs) are available via
+`gdb-cli exec -s $SESSION "monitor reset"`; to leave the target running
+when stopping, use `gdb-cli stop -s $SESSION --before-detach "monitor go"`.
 
-### Step 1: Initialize Debug Session
-**For debugging a binary file through a target running on a remote host and port**
+**For a target running on a remote host and port (server ALREADY running —
+e.g. a JLinkGDBServer you started yourself, or one left listening after a
+jlink session was stopped):**
 ```bash
 gdb-cli target --binary <binary_path> --remote <host_name>:<port_number> [--gdb-path <gdb_path>]
 ```
@@ -357,7 +351,7 @@ gdb-cli stop -s $SESSION
 # Stop session and leave the target running (embedded)
 gdb-cli stop -s $SESSION --before-detach "monitor go"
 
-# J-Link lifecycle (see Step 0): stop session AND server, or restart both
+# J-Link lifecycle (see Step 1): stop session AND server, or restart both
 gdb-cli jlink stop --all
 gdb-cli jlink restart
 ```
