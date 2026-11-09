@@ -20,11 +20,9 @@ _JLINK_GDBSERVER_EPILOG = (
     "  -port <n>               TCP-порт для GDB-клиентов; не указан =\n"
     "                          gdb-cli выбирает свободный порт.\n"
     "                          gdb-cli: --port\n"
-    "  -rtos <plugin>          Включает поддержку потоков RTOS через плагин\n"
-    "                          SEGGER.  gdb-cli: --rtos <имя>, добавляет\n"
-    "                          -rtos GDBServer/RTOSPlugin_<имя>.  Типичные\n"
-    "                          имена: FreeRTOS, embOS, Zephyr, Azure,\n"
-    "                          ChibiOS, NuttX.\n"
+    "  -rtos <name>            Включает поддержку потоков RTOS.  gdb-cli:\n"
+    "                          --rtos <name>.  Поддерживаются: FreeRTOS,\n"
+    "                          embOS, Zephyr, Azure, ChibiOS, NuttX.\n"
     "  -swoport <n>            Порт для клиентов необработанного вывода SWO;\n"
     "                          --extra-arg -swoport --extra-arg <n>.\n"
     "  -telnetport <n>         Порт для клиентов вывода printf цели;\n"
@@ -239,8 +237,8 @@ RU_CATALOG = {
     "cli.jlink.jlink_path_help": "Путь к исполняемому файлу JLinkGDBServer",
     "cli.jlink.speed_help": "Скорость интерфейса в кГц (по умолчанию: авто)",
     "cli.jlink.rtos_help": (
-        "Имя RTOS-плагина для поддержки потоков (например, FreeRTOS); "
-        "добавляет -rtos GDBServer/RTOSPlugin_<имя>"
+        "RTOS для поддержки потоков: FreeRTOS, embOS, Zephyr, Azure, "
+        "ChibiOS или NuttX"
     ),
     "cli.jlink.interface_help": "Отладочный интерфейс (SWD/JTAG)",
     "cli.jlink.port_help": "Порт GDB Server (по умолчанию: свободный порт)",

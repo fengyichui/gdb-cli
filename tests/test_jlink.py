@@ -1147,12 +1147,25 @@ def test_english_jlink_help_has_meanings_and_no_deprecated_options():
     text = ENGLISH_CATALOG["cli.jlink.epilog"]
     # Each bridged option is described, not just mapped.
     assert "--rtos <name>" in text
-    assert "GDBServer/RTOSPlugin_<name>" in text
     assert "raw SWO output" in text
     assert "target printf" in text
     assert "single GDB connection" in text
+    # All currently supported RTOS plugins are listed.
+    for name in ("FreeRTOS", "embOS", "Zephyr", "Azure", "ChibiOS", "NuttX"):
+        assert name in text
+    # The internal server mapping is an implementation detail.
+    assert "GDBServer/RTOSPlugin_" not in text
     # Deprecated / replaced options must not be advertised.
     assert "-JLinkDevicesXMLPath" not in text
     assert "-USB" not in text
     assert "-IP " not in text
+
+
+def test_rtos_help_lists_supported_plugins_without_internals():
+    from gdb_cli.locales.en import ENGLISH_CATALOG
+
+    text = ENGLISH_CATALOG["cli.jlink.rtos_help"]
+    for name in ("FreeRTOS", "embOS", "Zephyr", "Azure", "ChibiOS", "NuttX"):
+        assert name in text
+    assert "GDBServer/RTOSPlugin_" not in text
 

@@ -18,10 +18,8 @@ _JLINK_GDBSERVER_EPILOG = (
     "                          gdb-cli：--speed（默认自动）\n"
     "  -port <n>               GDB 客户端连接的 TCP 端口；省略 = 由 gdb-cli\n"
     "                          自动选择空闲端口。gdb-cli：--port\n"
-    "  -rtos <plugin>          通过 SEGGER 插件启用 RTOS 线程感知。\n"
-    "                          gdb-cli：--rtos <名称>，内部自动传入\n"
-    "                          -rtos GDBServer/RTOSPlugin_<名称>。\n"
-    "                          常用名称：FreeRTOS、embOS、Zephyr、Azure、\n"
+    "  -rtos <name>            启用 RTOS 线程感知。gdb-cli：--rtos <名称>。\n"
+    "                          当前支持：FreeRTOS、embOS、Zephyr、Azure、\n"
     "                          ChibiOS、NuttX。\n"
     "  -swoport <n>            供客户端读取原始 SWO 输出的端口；\n"
     "                          --extra-arg -swoport --extra-arg <n>。\n"
@@ -233,8 +231,7 @@ ZH_CN_CATALOG = {
     "cli.jlink.jlink_path_help": "JLinkGDBServer 可执行文件路径",
     "cli.jlink.speed_help": "接口速度（kHz，默认自动）",
     "cli.jlink.rtos_help": (
-        "RTOS 插件名，用于线程感知（如 FreeRTOS）；内部自动添加 "
-        "-rtos GDBServer/RTOSPlugin_<名称>"
+        "RTOS 线程感知：FreeRTOS、embOS、Zephyr、Azure、ChibiOS 或 NuttX"
     ),
     "cli.jlink.interface_help": "调试接口（SWD/JTAG）",
     "cli.jlink.port_help": "GDB Server 端口（默认自动选择空闲端口）",

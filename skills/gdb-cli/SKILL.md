@@ -103,13 +103,9 @@ gdb-cli jlink -d <device_name> --select usb=<sn> --binary <fw.elf> \
   JLinkGDBServer args pass through `--extra-arg`, but
   `-select/-port/-device/-if/-rtos/-gui/-nogui` are reserved.
 - **RTOS thread awareness** (FreeRTOS/embOS/Zephyr/Azure/ChibiOS/NuttX):
-  JLinkGDBServer loads an RTOS plugin and exposes RTOS tasks as GDB
-  threads. Use `--rtos <name>`; gdb-cli automatically passes `-rtos
-  GDBServer/RTOSPlugin_<name>` (the `GDBServer/` prefix is required on
-  Linux — bare `FreeRTOS` does not resolve). Available plugins:
-  `FreeRTOS`, `embOS`, `Zephyr`, `Azure`, `ChibiOS`, `NuttX` (list
-  yours with `ls <JLink>/GDBServer/RTOSPlugin_*`; pass the name without
-  the `RTOSPlugin_` prefix). Requirements
+  exposes RTOS tasks as GDB threads. Use `--rtos <name>` with one of:
+  `FreeRTOS`, `embOS`, `Zephyr`, `Azure`, `ChibiOS`, `NuttX`.
+  Requirements
   verified in practice: the ELF with RTOS symbols must be passed via
   `--binary`; tasks appear in `gdb-cli threads` when the scheduler is
   running (run past `vTaskStartScheduler()`). Caveat: the official

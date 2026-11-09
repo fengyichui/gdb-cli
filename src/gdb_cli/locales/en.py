@@ -20,11 +20,9 @@ _JLINK_GDBSERVER_EPILOG = (
     "                          gdb-cli: --speed (default auto)\n"
     "  -port <n>               TCP port GDB clients connect to; omitted =\n"
     "                          gdb-cli picks a free port.  gdb-cli: --port\n"
-    "  -rtos <plugin>          Enables RTOS thread awareness via a SEGGER\n"
-    "                          plugin.  gdb-cli: --rtos <name>, which adds\n"
-    "                          -rtos GDBServer/RTOSPlugin_<name>.  Common\n"
-    "                          names: FreeRTOS, embOS, Zephyr, Azure,\n"
-    "                          ChibiOS, NuttX.\n"
+    "  -rtos <name>            Enables RTOS thread awareness.  gdb-cli:\n"
+    "                          --rtos <name>.  Supported: FreeRTOS, embOS,\n"
+    "                          Zephyr, Azure, ChibiOS, NuttX.\n"
     "  -swoport <n>            Port for clients consuming raw SWO output;\n"
     "                          --extra-arg -swoport --extra-arg <n>.\n"
     "  -telnetport <n>         Port for clients consuming target printf\n"
@@ -237,8 +235,8 @@ ENGLISH_CATALOG = {
     "cli.jlink.jlink_path_help": "JLinkGDBServer executable path",
     "cli.jlink.speed_help": "Interface speed in kHz (default: auto)",
     "cli.jlink.rtos_help": (
-        "RTOS plugin for thread awareness (e.g. FreeRTOS); adds "
-        "-rtos GDBServer/RTOSPlugin_<name>"
+        "RTOS for thread awareness: FreeRTOS, embOS, Zephyr, Azure, "
+        "ChibiOS or NuttX"
     ),
     "cli.jlink.interface_help": "Debug interface (SWD/JTAG)",
     "cli.jlink.port_help": "GDB server port (default: auto-selected free port)",
