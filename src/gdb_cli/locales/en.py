@@ -4,6 +4,68 @@ English Catalog - 英语翻译目录
 Source language for all translations.
 """
 
+# Shared verbatim by ``jlink --help`` and ``jlink start --help`` so both
+# command levels document the JLinkGDBServer options identically.
+_JLINK_GDBSERVER_EPILOG = (
+    "\b\n"
+    "JLinkGDBServer options bridged by gdb-cli.  Each entry shows the\n"
+    "server option, what it does, and the gdb-cli option that maps to it:\n"
+    "  -device <name>          Selects the target MCU/device known to J-Link\n"
+    "                          (mandatory).  gdb-cli: -d/--device\n"
+    "  -select <sel>           Selects the probe: usb=<serial|nickname> or\n"
+    "                          ip=HOST:PORT.  gdb-cli: --select\n"
+    "  -if <interface>         Target interface: SWD, JTAG, FINE or\n"
+    "                          2-wire-JTAG-PIC32.  gdb-cli: --if (SWD)\n"
+    "  -speed <kHz>            Interface clock in kHz; omitted = auto-detect.\n"
+    "                          gdb-cli: --speed (default auto)\n"
+    "  -port <n>               TCP port GDB clients connect to; omitted =\n"
+    "                          gdb-cli picks a free port.  gdb-cli: --port\n"
+    "  -rtos <plugin>          Enables RTOS thread awareness via a SEGGER\n"
+    "                          plugin.  gdb-cli: --rtos <name>, which adds\n"
+    "                          -rtos GDBServer/RTOSPlugin_<name>.  Common\n"
+    "                          names: FreeRTOS, embOS, Zephyr, Azure,\n"
+    "                          ChibiOS, NuttX.\n"
+    "  -swoport <n>            Port for clients consuming raw SWO output;\n"
+    "                          --extra-arg -swoport --extra-arg <n>.\n"
+    "  -telnetport <n>         Port for clients consuming target printf\n"
+    "                          output; --extra-arg -telnetport <n>.\n"
+    "  -RTTTelnetPort <n>      Telnet port for SEGGER RTT output;\n"
+    "                          --extra-arg -RTTTelnetPort --extra-arg <n>.\n"
+    "  -x <file>               GDB command file executed once, when the first\n"
+    "                          GDB client connects; --extra-arg -x <file>.\n"
+    "  -xc <file>              GDB command file executed on every GDB client\n"
+    "                          connection; --extra-arg -xc <file>.\n"
+    "  -jlinkscriptfile <f>    J-Link script file run before debugging;\n"
+    "                          --extra-arg -jlinkscriptfile --extra-arg <f>.\n"
+    "  -jtagconf <IR>,<DR>     JTAG scan chain: total IR length and number of\n"
+    "                          devices before the target; --extra-arg ...\n"
+    "  -excdbg <nSteps>        Enables exception debugging; sets how many\n"
+    "                          instructions run until the exception returns;\n"
+    "                          --extra-arg -excdbg --extra-arg <nSteps>.\n"
+    "  -powertarget <delay>    Powers the target after the given delay\n"
+    "                          (1-9; 0 turns power off); --extra-arg ...\n"
+    "  -singlerun / -s         Accepts a single GDB connection, then exits;\n"
+    "                          --extra-arg -singlerun.\n"
+    "  -noreset                Halts the CPU on connect without resetting the\n"
+    "                          target; --extra-arg -noreset.\n"
+    "  -log <file>             Writes the GDB Server communication log to\n"
+    "                          <file>; --extra-arg -log --extra-arg <file>.\n"
+    "  -settingsfile <file>    Loads J-Link settings from <file>;\n"
+    "                          --extra-arg -settingsfile --extra-arg <file>.\n"
+    "  -strict                 Starts GDB Server in strict mode;\n"
+    "                          --extra-arg -strict.\n"
+    "  -endian <little|big>    Target endianness; --extra-arg -endian <e>.\n"
+    "\n\b\n"
+    "Always forced by gdb-cli (cannot be overridden):\n"
+    "  -nogui -nolocalhostonly -halt -nosilent -vd -noir -notimeout\n"
+    "\n\b\n"
+    "Reserved via --extra-arg (use the gdb-cli options above):\n"
+    "  -device -select -port -if -rtos -gui -nogui\n"
+    "\n\b\n"
+    "Any other JLinkGDBServer flag can be passed through --extra-arg\n"
+    "(one token per --extra-arg)."
+)
+
 ENGLISH_CATALOG = {
     # === CLI Group ===
     "cli.group.help": "GDB CLI for AI - Thin client CLI + GDB built-in Python RPC Server",
@@ -156,86 +218,9 @@ ENGLISH_CATALOG = {
 
     # === jlink command group ===
     "cli.jlink.doc": "Manage JLinkGDBServer and automatically start a GDB session",
-    "cli.jlink.epilog": (
-        "\b\n"
-        "JLinkGDBServer arguments are mapped to gdb-cli options:\n"
-        "  -device DEV             -> -d, --device DEV\n"
-        "  -select SELECT          -> --select usb=<serial|nickname> | ip=HOST:PORT\n"
-        "  -if IF                  -> --if SWD|JTAG\n"
-        "  -speed SPEED            -> --speed kHz (omit = auto)\n"
-        "  -port PORT              -> --port (omit = free port auto-picked)\n"
-        "  -swoport/-telnetport/   -> --extra-arg\n"
-        "  -RTTTelnetPort\n"
-        "  -rtos PLUGIN            -> --extra-arg -rtos\n"
-        "                            --extra-arg GDBServer/RTOSPlugin_<name>\n"
-        "  -x/-xc FILE             -> --extra-arg -x --extra-arg <gdbinit>\n"
-        "  -jlinkscriptfile FILE   -> --extra-arg\n"
-        "  -jtagconf/-excdbg/      -> --extra-arg\n"
-        "  -powertarget\n"
-        "  -USB <sn> / -IP <host>  -> use --select instead\n"
-        "  -singlerun/-noreset/    -> --extra-arg\n"
-        "  -log/-settingsfile\n"
-        "\n"
-        "Always forced by gdb-cli (cannot be overridden):\n"
-        "  -nogui -nolocalhostonly -halt -nosilent -vd -noir -notimeout\n"
-        "\n"
-        "Reserved (cannot be passed via --extra-arg):\n"
-        "  -select, -port, -device, -if, -gui, -nogui\n"
-        "\n"
-        "Run 'gdb-cli jlink start --help' for all options."
-    ),
+    "cli.jlink.epilog": _JLINK_GDBSERVER_EPILOG,
     "cli.jlink.start.doc": "Start JLinkGDBServer and connect GDB",
-    "cli.jlink.start_epilog": (
-        "\b\n"
-        "Bridged JLinkGDBServer command-line options (see also group help):\n"
-        "  -device <name>          -d/--device (mandatory; MCU name J-Link\n"
-        "                          knows, e.g. nRF54L15_M33)\n"
-        "  -select <sel>           --select usb=<serial|nickname> |\n"
-        "                          ip=HOST:PORT\n"
-        "  -if <SWD|JTAG|FINE|     --if (default SWD)\n"
-        "    2-wire-JTAG-PIC32>\n"
-        "  -speed <kHz|auto>       --speed (omit = auto-detect)\n"
-        "  -port <n>               --port (omit = auto-picked free port)\n"
-        "  -swoport <n>            --extra-arg -swoport --extra-arg <n>\n"
-        "  -telnetport <n>         --extra-arg -telnetport --extra-arg <n>\n"
-        "  -RTTTelnetPort <n>      --extra-arg -RTTTelnetPort --extra-arg <n>\n"
-        "  -rtos <plugin>          --extra-arg -rtos --extra-arg <plugin>\n"
-        "                          (RTOS thread awareness; on Linux the\n"
-        "                          plugin path must include the GDBServer/\n"
-        "                          subdirectory, e.g.\n"
-        "                          --extra-arg -rtos\n"
-        "                          --extra-arg GDBServer/RTOSPlugin_FreeRTOS\n"
-        "                          — bare 'FreeRTOS' fails to resolve)\n"
-        "                          Available plugins:\n"
-        "                          GDBServer/RTOSPlugin_FreeRTOS\n"
-        "                          GDBServer/RTOSPlugin_embOS\n"
-        "                          GDBServer/RTOSPlugin_Zephyr\n"
-        "                          GDBServer/RTOSPlugin_Azure\n"
-        "                          GDBServer/RTOSPlugin_ChibiOS\n"
-        "                          GDBServer/RTOSPlugin_NuttX\n"
-        "  -x <gdbinit>            --extra-arg -x --extra-arg <file>\n"
-        "  -xc <gdbinit>           --extra-arg -xc --extra-arg <file>\n"
-        "  -jlinkscriptfile <f>    --extra-arg -jlinkscriptfile --extra-arg <f>\n"
-        "  -jtagconf <IR>,<DR>     --extra-arg -jtagconf --extra-arg <IR,DR>\n"
-        "  -excdbg <nSteps>        --extra-arg -excdbg --extra-arg <n>\n"
-        "  -powertarget <delay>    --extra-arg -powertarget --extra-arg <n>\n"
-        "  -singlerun / -s         --extra-arg -singlerun\n"
-        "  -noreset                --extra-arg -noreset\n"
-        "  -log <file>             --extra-arg -log --extra-arg <file>\n"
-        "  -settingsfile <file>    --extra-arg -settingsfile --extra-arg <file>\n"
-        "  -strict                 --extra-arg -strict\n"
-        "  -endian <little|big>    --extra-arg -endian --extra-arg <e>\n"
-        "  -JLinkDevicesXMLPath    --extra-arg (deprecated by SEGGER)\n"
-        "  -USB <sn> / -IP <h>     use --select usb=<sn> / ip=<h>:<port> instead\n"
-        "\n"
-        "gdb-cli always forces (cannot be overridden):\n"
-        "  -nogui -nolocalhostonly -halt -nosilent -vd -noir -notimeout\n"
-        "\n"
-        "Reserved via --extra-arg: -select -port -device -if -gui -nogui.\n"
-        "\n"
-        "Any other JLinkGDBServer flag not listed passes through\n"
-        "--extra-arg verbatim (one token per --extra-arg)."
-    ),
+    "cli.jlink.start_epilog": _JLINK_GDBSERVER_EPILOG,
     "cli.jlink.stop.doc": "Stop JLinkGDBServer instance(s)",
     "cli.jlink.restart.doc": "Restart a JLinkGDBServer instance (reuses persisted GDB session settings)",
     "cli.jlink.status.doc": "Show JLinkGDBServer instance status",
@@ -251,6 +236,10 @@ ENGLISH_CATALOG = {
     "cli.jlink.gdb_path_help": "GDB executable path",
     "cli.jlink.jlink_path_help": "JLinkGDBServer executable path",
     "cli.jlink.speed_help": "Interface speed in kHz (default: auto)",
+    "cli.jlink.rtos_help": (
+        "RTOS plugin for thread awareness (e.g. FreeRTOS); adds "
+        "-rtos GDBServer/RTOSPlugin_<name>"
+    ),
     "cli.jlink.interface_help": "Debug interface (SWD/JTAG)",
     "cli.jlink.port_help": "GDB server port (default: auto-selected free port)",
     "cli.jlink.allow_write_help": "Allow memory modification",
@@ -265,6 +254,10 @@ ENGLISH_CATALOG = {
         "and use usb=<serial> or usb=<nickname>"
     ),
     "cli.jlink.ip_selector_required": "Invalid --select ip value; use ip=HOST:PORT",
+    "cli.jlink.rtos_invalid": (
+        "Invalid RTOS plugin name: {value} (use a plain name such as "
+        "FreeRTOS; no paths, whitespace or control characters)"
+    ),
     "cli.jlink.device_required": "Missing --device (JLinkGDBServer requires a device name)",
     "cli.jlink.port_busy": "Port {port} is already in use",
     "cli.jlink.no_instance": "J-Link instance not found: {instance_id}",

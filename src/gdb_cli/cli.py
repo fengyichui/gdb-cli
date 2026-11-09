@@ -815,6 +815,7 @@ def _jlink_start_options(func):
         "--if", "interface", default="SWD", help=t("cli.jlink.interface_help")
     )(func)
     func = click.option("--speed", default=None, help=t("cli.jlink.speed_help"))(func)
+    func = click.option("--rtos", default=None, help=t("cli.jlink.rtos_help"))(func)
     func = click.option(
         "--jlink-path", default="JLinkGDBServer", help=t("cli.jlink.jlink_path_help")
     )(func)
@@ -838,6 +839,7 @@ _JLINK_START_OPTION_NAMES = (
     "gdb_path",
     "jlink_path",
     "speed",
+    "rtos",
     "interface",
     "port",
     "allow_write",
@@ -1086,6 +1088,7 @@ def jlink(
     gdb_path: str,
     jlink_path: str,
     speed: Optional[str],
+    rtos: Optional[str],
     interface: str,
     port: Optional[int],
     allow_write: bool,
@@ -1112,6 +1115,7 @@ def jlink(
         gdb_path=gdb_path,
         jlink_path=jlink_path,
         speed=speed,
+        rtos=rtos,
         interface=interface,
         port=port,
         allow_write=allow_write,
@@ -1131,6 +1135,7 @@ def jlink_start(
     gdb_path: str,
     jlink_path: str,
     speed: Optional[str],
+    rtos: Optional[str],
     interface: str,
     port: Optional[int],
     allow_write: bool,
@@ -1149,6 +1154,7 @@ def jlink_start(
         gdb_path = merged.get("gdb_path", gdb_path)
         jlink_path = merged.get("jlink_path", jlink_path)
         speed = merged.get("speed", speed)
+        rtos = merged.get("rtos", rtos)
         interface = merged.get("interface", interface)
         port = merged.get("port", port)
         allow_write = merged.get("allow_write", allow_write)
@@ -1169,6 +1175,7 @@ def jlink_start(
             select=select,
             port=port,
             speed=speed,
+            rtos=rtos,
             interface=interface,
             extra_args=list(extra_args or ()),
             jlink_exe=jlink_path,

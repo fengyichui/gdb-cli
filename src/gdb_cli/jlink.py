@@ -32,12 +32,17 @@ _TAIL_LINES = 15
 
 # Parameters owned by this module.  Extra user arguments must never be able to
 # override them, otherwise the persisted instance metadata would lie.
-_PROTECTED_GDBSERVER_ARGS = {"-select", "-port", "-device", "-if", "-gui", "-nogui"}
+_PROTECTED_GDBSERVER_ARGS = {
+    "-select", "-port", "-device", "-if", "-rtos", "-gui", "-nogui",
+}
 
 # Characters that must never appear in a probe selector/host: whitespace and
 # ASCII control characters.
 _UNSAFE_SELECTOR_RE = re.compile(r"[\s\x00-\x1f\x7f]")
 _PORT_RE = re.compile(r"^[0-9]+$")
+# RTOS plugin names are plain identifiers; the GDBServer/RTOSPlugin_ prefix
+# is added by build_gdbserver_cmdline, never supplied by the user.
+_RTOS_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_+-]*$")
 
 
 class JLinkManagerError(Exception):
@@ -138,6 +143,23 @@ def validate_select(select: str) -> str:
     raise JLinkManagerError(t("cli.jlink.select_invalid", value=value))
 
 
+def validate_rtos(rtos: str) -> str:
+    """Validate a user supplied RTOS plugin name.
+
+    Only a plain plugin name such as ``FreeRTOS`` or ``embOS`` is accepted.
+    The ``GDBServer/RTOSPlugin_`` prefix is added by
+    :func:`build_gdbserver_cmdline`, so paths, separators, whitespace and
+    control characters are rejected here.
+    """
+    raw = rtos or ""
+    if "\n" in raw or "\r" in raw:
+        raise JLinkManagerError(t("cli.jlink.rtos_invalid", value=raw))
+    value = raw.strip()
+    if not value or not _RTOS_NAME_RE.match(value):
+        raise JLinkManagerError(t("cli.jlink.rtos_invalid", value=raw))
+    return value
+
+
 def _validate_extra_args(extra_args: List[str]) -> None:
     """Reject extra arguments that would override protected parameters."""
     for token in extra_args or []:
@@ -154,6 +176,7 @@ def build_gdbserver_cmdline(
     port: int,
     speed: Optional[str] = None,
     interface: str = "SWD",
+    rtos: Optional[str] = None,
     extra_args: List[str],
     jlink_exe: str = DEFAULT_GDBSERVER_EXE,
 ) -> List[str]:
@@ -161,9 +184,12 @@ def build_gdbserver_cmdline(
 
     ``-nogui`` and the fixed defaults are always forced.  ``-speed`` is only
     added when explicitly requested (otherwise SEGGER auto-detects it).
+    ``rtos`` is a plain plugin name (``FreeRTOS``); the required
+    ``GDBServer/RTOSPlugin_`` prefix is added automatically.
     """
     port_number = _validate_port(port)
     normalized_select = validate_select(select)
+    normalized_rtos = validate_rtos(rtos) if rtos else None
     _validate_extra_args(list(extra_args or []))
 
     cmdline = [
@@ -182,6 +208,10 @@ def build_gdbserver_cmdline(
     ]
     if speed:
         cmdline.extend(["-speed", str(speed)])
+    if normalized_rtos:
+        cmdline.extend([
+            "-rtos", f"GDBServer/RTOSPlugin_{normalized_rtos}",
+        ])
     if extra_args:
         cmdline.extend(extra_args)
     return cmdline

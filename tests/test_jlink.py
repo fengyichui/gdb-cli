@@ -74,12 +74,14 @@ def test_build_cmdline_speed_interface_and_extra_args():
         port=2400,
         speed="4000",
         interface="JTAG",
-        extra_args=["-rtos", "FreeRTOS", "-jlinkscriptfile", "f.jlink"],
+        rtos="FreeRTOS",
+        extra_args=["-jlinkscriptfile", "f.jlink"],
     )
 
     assert _value_after(cmdline, "-if") == "JTAG"
     assert _value_after(cmdline, "-speed") == "4000"
-    assert cmdline[-4:] == ["-rtos", "FreeRTOS", "-jlinkscriptfile", "f.jlink"]
+    assert _value_after(cmdline, "-rtos") == "GDBServer/RTOSPlugin_FreeRTOS"
+    assert cmdline[-2:] == ["-jlinkscriptfile", "f.jlink"]
 
 
 def test_build_cmdline_custom_executable():
@@ -90,7 +92,36 @@ def test_build_cmdline_custom_executable():
     assert cmdline[0] == "/opt/JLink/JLinkGDBServer"
 
 
-@pytest.mark.parametrize("token", ["-select", "-gui", "-nogui", "-port", "-device", "-if"])
+def test_build_cmdline_rtos_prefixes_plugin_path():
+    cmdline = jlink.build_gdbserver_cmdline(
+        device="D", select="usb=1", port=2331, rtos="embOS", extra_args=[],
+    )
+    assert _value_after(cmdline, "-rtos") == "GDBServer/RTOSPlugin_embOS"
+
+
+@pytest.mark.parametrize(
+    "rtos",
+    [
+        "FreeRTOS/../x", "GDBServer/RTOSPlugin_FreeRTOS",
+        "Free RTOS", "FreeRTOS\n", "-FreeRTOS",
+    ],
+)
+def test_build_cmdline_rejects_invalid_rtos_name(rtos):
+    with pytest.raises(jlink.JLinkManagerError):
+        jlink.build_gdbserver_cmdline(
+            device="D", select="usb=1", port=2331, rtos=rtos, extra_args=[],
+        )
+
+
+@pytest.mark.parametrize("rtos", ["", None])
+def test_build_cmdline_blank_rtos_means_disabled(rtos):
+    cmdline = jlink.build_gdbserver_cmdline(
+        device="D", select="usb=1", port=2331, rtos=rtos, extra_args=[],
+    )
+    assert "-rtos" not in cmdline
+
+
+@pytest.mark.parametrize("token", ["-select", "-gui", "-nogui", "-port", "-device", "-if", "-rtos"])
 def test_build_cmdline_rejects_protected_extra_args(token):
     with pytest.raises(jlink.JLinkManagerError) as excinfo:
         jlink.build_gdbserver_cmdline(
@@ -102,9 +133,8 @@ def test_build_cmdline_rejects_protected_extra_args(token):
 def test_build_cmdline_allows_unprotected_extra_args():
     cmdline = jlink.build_gdbserver_cmdline(
         device="D", select="usb=1", port=2331,
-        extra_args=["-rtos", "FreeRTOS", "-swoport", "19021", "-jlinkscriptfile", "a.jlink"],
+        extra_args=["-swoport", "19021", "-jlinkscriptfile", "a.jlink"],
     )
-    assert "-rtos" in cmdline
     assert "-swoport" in cmdline
     assert "-jlinkscriptfile" in cmdline
 
@@ -596,6 +626,7 @@ class TestJLinkCLI(unittest.TestCase):
             "gdb_path": "gdb",
             "jlink_path": "JLinkGDBServer",
             "speed": None,
+            "rtos": None,
             "interface": "SWD",
             "port": 2331,
             "allow_write": False,
@@ -653,6 +684,42 @@ class TestJLinkCLI(unittest.TestCase):
             self._call_jlink(safety=True)
 
         assert mock_launch.call_args.kwargs["safety"] == "on"
+
+    def test_rtos_option_injects_plugin_path(self):
+        ctx = _FakeContext(invoked_subcommand=None)
+        _FakeClick._context = ctx
+        fake_process = types.SimpleNamespace(
+            session=types.SimpleNamespace(
+                session_id="sess1234", sock_path="/tmp/fake.sock"
+            )
+        )
+
+        with patch.object(self.cli, "start_gdbserver",
+                          return_value=self._instance()) as mock_start, \
+             patch.object(self.cli, "launch_target", return_value=fake_process), \
+             patch.object(self.cli, "_wait_session_ready",
+                          return_value={"state": "ready"}), \
+             patch.object(self.cli, "_save_instance"), \
+             patch.object(self.cli, "print_json"):
+            self._call_jlink(rtos="FreeRTOS")
+
+        cmdline = mock_start.call_args.args[0]
+        assert _value_after(cmdline, "-rtos") == (
+            "GDBServer/RTOSPlugin_FreeRTOS"
+        )
+
+    def test_invalid_rtos_name_exits_before_start(self):
+        ctx = _FakeContext(invoked_subcommand=None)
+        _FakeClick._context = ctx
+
+        with patch.object(self.cli, "start_gdbserver") as mock_start, \
+             patch.object(self.cli, "print_error") as mock_error:
+            with pytest.raises(self.cli.click.exceptions.Exit) as excinfo:
+                self._call_jlink(rtos="../FreeRTOS")
+
+        assert excinfo.value.exit_code == 1
+        mock_start.assert_not_called()
+        assert "RTOS" in mock_error.call_args.args[0]
 
     def test_usb_without_selector_errors_and_mentions_devices(self):
         ctx = _FakeContext(invoked_subcommand=None)
@@ -744,6 +811,7 @@ def _start_kwargs(**overrides):
         "gdb_path": "gdb",
         "jlink_path": "JLinkGDBServer",
         "speed": None,
+        "rtos": None,
         "interface": "SWD",
         "port": 2331,
         "allow_write": False,
@@ -1039,4 +1107,52 @@ def test_restart_connect_failure_cleans_up_and_exits(cli_module, jlink_dir):
     mock_cleanup.assert_called_once_with(restarted)
     assert mock_error.call_args.args[1] == "reconnect failed"
     assert mock_error.call_args.args[2] == ["cleanup"]
+
+
+def test_merge_group_params_propagates_rtos(cli_module):
+    parent = _ParamCtx(
+        {"rtos": "FreeRTOS"},
+        {"rtos": ParameterSource.COMMANDLINE},
+    )
+    ctx = _ParamCtx(
+        {"rtos": None},
+        {"rtos": ParameterSource.DEFAULT},
+        parent,
+    )
+
+    assert cli_module._merge_group_params(ctx)["rtos"] == "FreeRTOS"
+
+
+@pytest.mark.parametrize(
+    "catalog_name",
+    ["ENGLISH_CATALOG", "ZH_CN_CATALOG", "RU_CATALOG"],
+)
+def test_jlink_help_epilogs_match(catalog_name):
+    module = importlib.import_module(
+        {
+            "ENGLISH_CATALOG": "gdb_cli.locales.en",
+            "ZH_CN_CATALOG": "gdb_cli.locales.zh_cn",
+            "RU_CATALOG": "gdb_cli.locales.ru",
+        }[catalog_name]
+    )
+    catalog = getattr(module, catalog_name)
+
+    # Group help and ``start --help`` must document the same server options.
+    assert catalog["cli.jlink.epilog"] == catalog["cli.jlink.start_epilog"]
+
+
+def test_english_jlink_help_has_meanings_and_no_deprecated_options():
+    from gdb_cli.locales.en import ENGLISH_CATALOG
+
+    text = ENGLISH_CATALOG["cli.jlink.epilog"]
+    # Each bridged option is described, not just mapped.
+    assert "--rtos <name>" in text
+    assert "GDBServer/RTOSPlugin_<name>" in text
+    assert "raw SWO output" in text
+    assert "target printf" in text
+    assert "single GDB connection" in text
+    # Deprecated / replaced options must not be advertised.
+    assert "-JLinkDevicesXMLPath" not in text
+    assert "-USB" not in text
+    assert "-IP " not in text
 

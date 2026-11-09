@@ -2,6 +2,67 @@
 Chinese (Simplified) Catalog - 简体中文翻译目录
 """
 
+# ``jlink --help`` 与 ``jlink start --help`` 共用，保证两处对
+# JLinkGDBServer 选项的说明完全一致。
+_JLINK_GDBSERVER_EPILOG = (
+    "\b\n"
+    "gdb-cli 对接的 JLinkGDBServer 选项。每项依次为：服务器选项、作用、\n"
+    "对应的 gdb-cli 选项：\n"
+    "  -device <name>          选择 J-Link 已知的目标芯片/设备（必填）。\n"
+    "                          gdb-cli：-d/--device\n"
+    "  -select <sel>           选择调试探针：usb=<序列号|昵称> 或\n"
+    "                          ip=HOST:PORT。gdb-cli：--select\n"
+    "  -if <interface>         目标接口：SWD、JTAG、FINE 或\n"
+    "                          2-wire-JTAG-PIC32。gdb-cli：--if（默认 SWD）\n"
+    "  -speed <kHz>            接口时钟频率（kHz）；省略 = 自动检测。\n"
+    "                          gdb-cli：--speed（默认自动）\n"
+    "  -port <n>               GDB 客户端连接的 TCP 端口；省略 = 由 gdb-cli\n"
+    "                          自动选择空闲端口。gdb-cli：--port\n"
+    "  -rtos <plugin>          通过 SEGGER 插件启用 RTOS 线程感知。\n"
+    "                          gdb-cli：--rtos <名称>，内部自动传入\n"
+    "                          -rtos GDBServer/RTOSPlugin_<名称>。\n"
+    "                          常用名称：FreeRTOS、embOS、Zephyr、Azure、\n"
+    "                          ChibiOS、NuttX。\n"
+    "  -swoport <n>            供客户端读取原始 SWO 输出的端口；\n"
+    "                          --extra-arg -swoport --extra-arg <n>。\n"
+    "  -telnetport <n>         供客户端读取目标 printf 输出的端口；\n"
+    "                          --extra-arg -telnetport --extra-arg <n>。\n"
+    "  -RTTTelnetPort <n>      SEGGER RTT 输出的 Telnet 端口；\n"
+    "                          --extra-arg -RTTTelnetPort --extra-arg <n>。\n"
+    "  -x <file>               GDB 命令脚本，仅在第一个 GDB 客户端连接时\n"
+    "                          执行一次；--extra-arg -x --extra-arg <file>。\n"
+    "  -xc <file>              GDB 命令脚本，每次 GDB 客户端连接时都执行；\n"
+    "                          --extra-arg -xc --extra-arg <file>。\n"
+    "  -jlinkscriptfile <f>    调试前运行的 J-Link 脚本文件；\n"
+    "                          --extra-arg -jlinkscriptfile --extra-arg <f>。\n"
+    "  -jtagconf <IR>,<DR>     JTAG 扫描链：总 IR 长度和目标之前的器件数；\n"
+    "                          --extra-arg -jtagconf --extra-arg <IR,DR>。\n"
+    "  -excdbg <nSteps>        启用异常调试；设置异常返回到断点前需执行的\n"
+    "                          指令数；--extra-arg -excdbg --extra-arg <n>。\n"
+    "  -powertarget <delay>    延时后给目标上电（1-9；0 表示断电）；\n"
+    "                          --extra-arg -powertarget --extra-arg <n>。\n"
+    "  -singlerun / -s         只接受一次 GDB 连接，随后退出；\n"
+    "                          --extra-arg -singlerun。\n"
+    "  -noreset                连接时只暂停 CPU，不复位目标；\n"
+    "                          --extra-arg -noreset。\n"
+    "  -log <file>             将 GDB Server 通信日志写入 <file>；\n"
+    "                          --extra-arg -log --extra-arg <file>。\n"
+    "  -settingsfile <file>    从 <file> 加载 J-Link 设置；\n"
+    "                          --extra-arg -settingsfile --extra-arg <file>。\n"
+    "  -strict                 以严格模式启动 GDB Server；\n"
+    "                          --extra-arg -strict。\n"
+    "  -endian <little|big>    目标字节序；--extra-arg -endian --extra-arg <e>。\n"
+    "\n\b\n"
+    "gdb-cli 始终强制注入（不可覆盖）：\n"
+    "  -nogui -nolocalhostonly -halt -nosilent -vd -noir -notimeout\n"
+    "\n\b\n"
+    "保留参数（不可经 --extra-arg 传入，请使用上面的 gdb-cli 选项）：\n"
+    "  -device -select -port -if -rtos -gui -nogui\n"
+    "\n\b\n"
+    "其余 JLinkGDBServer 参数均可通过 --extra-arg 原样传入\n"
+    "（每个 --extra-arg 传一个 token）。"
+)
+
 ZH_CN_CATALOG = {
     # === CLI Group ===
     "cli.group.help": "GDB CLI for AI - 瘦客户端 CLI + GDB 内置 Python RPC Server",
@@ -154,85 +215,9 @@ ZH_CN_CATALOG = {
 
     # === jlink command group ===
     "cli.jlink.doc": "管理 JLinkGDBServer 并自动建立 GDB 会话",
-    "cli.jlink.epilog": (
-        "\b\n"
-        "JLinkGDBServer 参数与 gdb-cli 选项的对应关系：\n"
-        "  -device DEV             -> -d, --device DEV\n"
-        "  -select SELECT          -> --select usb=<serial|nickname> | ip=HOST:PORT\n"
-        "  -if IF                  -> --if SWD|JTAG\n"
-        "  -speed SPEED            -> --speed kHz（不传 = 自动）\n"
-        "  -port PORT              -> --port（不传 = 自动分配空闲端口）\n"
-        "  -swoport/-telnetport/   -> --extra-arg\n"
-        "  -RTTTelnetPort\n"
-        "  -rtos PLUGIN            -> --extra-arg -rtos\n"
-        "                            --extra-arg GDBServer/RTOSPlugin_<名称>\n"
-        "  -x/-xc FILE             -> --extra-arg -x --extra-arg <gdbinit>\n"
-        "  -jlinkscriptfile FILE   -> --extra-arg\n"
-        "  -jtagconf/-excdbg/      -> --extra-arg\n"
-        "  -powertarget\n"
-        "  -USB <sn> / -IP <host>  -> 改用 --select\n"
-        "  -singlerun/-noreset/    -> --extra-arg\n"
-        "  -log/-settingsfile\n"
-        "\n"
-        "gdb-cli 始终强制注入（不可覆盖）：\n"
-        "  -nogui -nolocalhostonly -halt -nosilent -vd -noir -notimeout\n"
-        "\n"
-        "保留参数（不可经 --extra-arg 传入）：\n"
-        "  -select、-port、-device、-if、-gui、-nogui\n"
-        "\n"
-        "运行 'gdb-cli jlink start --help' 查看全部选项。"
-    ),
+    "cli.jlink.epilog": _JLINK_GDBSERVER_EPILOG,
     "cli.jlink.start.doc": "启动 JLinkGDBServer 并连接 GDB",
-    "cli.jlink.start_epilog": (
-        "\b\n"
-        "JLinkGDBServer 命令行参数对照（另见组帮助）：\n"
-        "  -device <name>          -d/--device（必填；J-Link 认识的芯片名，\n"
-        "                          如 nRF54L15_M33）\n"
-        "  -select <sel>           --select usb=<serial|nickname> 或\n"
-        "                          ip=HOST:PORT\n"
-        "  -if <SWD|JTAG|FINE|     --if（默认 SWD）\n"
-        "    2-wire-JTAG-PIC32>\n"
-        "  -speed <kHz|auto>       --speed（不传 = 自动）\n"
-        "  -port <n>               --port（不传 = 自动分配空闲端口）\n"
-        "  -swoport <n>            --extra-arg -swoport --extra-arg <n>\n"
-        "  -telnetport <n>         --extra-arg -telnetport --extra-arg <n>\n"
-        "  -RTTTelnetPort <n>      --extra-arg -RTTTelnetPort --extra-arg <n>\n"
-        "  -rtos <plugin>          --extra-arg -rtos --extra-arg <plugin>\n"
-        "                          （RTOS 线程感知；Linux 下插件路径必须\n"
-        "                          含 GDBServer/ 子目录，如\n"
-        "                          --extra-arg -rtos\n"
-        "                          --extra-arg GDBServer/RTOSPlugin_FreeRTOS\n"
-        "                          ——裸写 'FreeRTOS' 无法解析）\n"
-        "                          可用插件：\n"
-        "                          GDBServer/RTOSPlugin_FreeRTOS\n"
-        "                          GDBServer/RTOSPlugin_embOS\n"
-        "                          GDBServer/RTOSPlugin_Zephyr\n"
-        "                          GDBServer/RTOSPlugin_Azure\n"
-        "                          GDBServer/RTOSPlugin_ChibiOS\n"
-        "                          GDBServer/RTOSPlugin_NuttX\n"
-        "  -x <gdbinit>            --extra-arg -x --extra-arg <file>\n"
-        "  -xc <gdbinit>           --extra-arg -xc --extra-arg <file>\n"
-        "  -jlinkscriptfile <f>    --extra-arg -jlinkscriptfile --extra-arg <f>\n"
-        "  -jtagconf <IR>,<DR>     --extra-arg -jtagconf --extra-arg <IR,DR>\n"
-        "  -excdbg <nSteps>        --extra-arg -excdbg --extra-arg <n>\n"
-        "  -powertarget <delay>    --extra-arg -powertarget --extra-arg <n>\n"
-        "  -singlerun / -s         --extra-arg -singlerun\n"
-        "  -noreset                --extra-arg -noreset\n"
-        "  -log <file>             --extra-arg -log --extra-arg <file>\n"
-        "  -settingsfile <file>    --extra-arg -settingsfile --extra-arg <file>\n"
-        "  -strict                 --extra-arg -strict\n"
-        "  -endian <little|big>    --extra-arg -endian --extra-arg <e>\n"
-        "  -JLinkDevicesXMLPath    --extra-arg（SEGGER 已弃用）\n"
-        "  -USB <sn> / -IP <h>     改用 --select usb=<sn> / ip=<h>:<port>\n"
-        "\n"
-        "gdb-cli 始终强制注入（不可覆盖）：\n"
-        "  -nogui -nolocalhostonly -halt -nosilent -vd -noir -notimeout\n"
-        "\n"
-        "--extra-arg 保留参数：-select -port -device -if -gui -nogui。\n"
-        "\n"
-        "未列出的其他 JLinkGDBServer 参数可经 --extra-arg 原样透传\n"
-        "（每个 --extra-arg 一个 token）。"
-    ),
+    "cli.jlink.start_epilog": _JLINK_GDBSERVER_EPILOG,
     "cli.jlink.stop.doc": "停止 JLinkGDBServer 实例",
     "cli.jlink.restart.doc": "重启 JLinkGDBServer 实例（复用已保存的 GDB 会话设置）",
     "cli.jlink.status.doc": "查看 JLinkGDBServer 实例状态",
@@ -247,6 +232,10 @@ ZH_CN_CATALOG = {
     "cli.jlink.gdb_path_help": "GDB 可执行文件路径",
     "cli.jlink.jlink_path_help": "JLinkGDBServer 可执行文件路径",
     "cli.jlink.speed_help": "接口速度（kHz，默认自动）",
+    "cli.jlink.rtos_help": (
+        "RTOS 插件名，用于线程感知（如 FreeRTOS）；内部自动添加 "
+        "-rtos GDBServer/RTOSPlugin_<名称>"
+    ),
     "cli.jlink.interface_help": "调试接口（SWD/JTAG）",
     "cli.jlink.port_help": "GDB Server 端口（默认自动选择空闲端口）",
     "cli.jlink.allow_write_help": "允许内存修改",
@@ -261,6 +250,10 @@ ZH_CN_CATALOG = {
         "再使用 usb=<序号> 或 usb=<昵称>"
     ),
     "cli.jlink.ip_selector_required": "--select ip 值非法；请使用 ip=HOST:PORT",
+    "cli.jlink.rtos_invalid": (
+        "无效的 RTOS 插件名：{value}（请使用 FreeRTOS 这样的纯名称，"
+        "不能包含路径、空白或控制字符）"
+    ),
     "cli.jlink.device_required": "缺少 --device（JLinkGDBServer 必须指定设备名）",
     "cli.jlink.port_busy": "端口 {port} 已被占用",
     "cli.jlink.no_instance": "未找到 J-Link 实例: {instance_id}",

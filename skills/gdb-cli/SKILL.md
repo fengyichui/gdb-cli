@@ -78,10 +78,10 @@ gdb-cli jlink status                                  # list managed servers (+ 
 gdb-cli jlink restart                                 # restart server + reconnect GDB session
 gdb-cli jlink stop --all                              # stop GDB session + server, clean up
 
-# RTOS thread awareness (FreeRTOS etc.): pass the SEGGER plugin via --extra-arg
+# RTOS thread awareness (FreeRTOS etc.): use the standard --rtos option
 gdb-cli jlink -d <device_name> --select usb=<sn> --binary <fw.elf> \
     --gdb-path /usr/bin/gdb-multiarch \
-    --extra-arg -rtos --extra-arg GDBServer/RTOSPlugin_FreeRTOS
+    --rtos FreeRTOS
 ```
 
 **Critical rules for `--select`:**
@@ -100,19 +100,16 @@ gdb-cli jlink -d <device_name> --select usb=<sn> --binary <fw.elf> \
   lines resolve.
 - Fixed internal defaults: `-if SWD -nolocalhostonly -halt -nosilent -vd
   -noir -notimeout`, `-nogui` always forced, `-port` auto-picked. Extra
-  JLinkGDBServer args pass through `--extra-arg` (e.g. `--extra-arg -rtos
-  --extra-arg FreeRTOS`), but `-select/-port/-device/-if/-gui/-nogui` are
-  reserved.
+  JLinkGDBServer args pass through `--extra-arg`, but
+  `-select/-port/-device/-if/-rtos/-gui/-nogui` are reserved.
 - **RTOS thread awareness** (FreeRTOS/embOS/Zephyr/Azure/ChibiOS/NuttX):
   JLinkGDBServer loads an RTOS plugin and exposes RTOS tasks as GDB
-  threads. Enable via `--extra-arg -rtos --extra-arg
-  GDBServer/RTOSPlugin_FreeRTOS` (plugin path is relative to the J-Link
-  install root; bare `FreeRTOS` does NOT work on Linux because the
-  plugins live in the `GDBServer/` subdirectory — always use the
-  `GDBServer/RTOSPlugin_<name>` form). Available plugins:
-  `RTOSPlugin_FreeRTOS`, `RTOSPlugin_embOS`, `RTOSPlugin_Zephyr`,
-  `RTOSPlugin_Azure`, `RTOSPlugin_ChibiOS`, `RTOSPlugin_NuttX` (list
-  yours with `ls <JLink>/GDBServer/RTOSPlugin_*`). Requirements
+  threads. Use `--rtos <name>`; gdb-cli automatically passes `-rtos
+  GDBServer/RTOSPlugin_<name>` (the `GDBServer/` prefix is required on
+  Linux — bare `FreeRTOS` does not resolve). Available plugins:
+  `FreeRTOS`, `embOS`, `Zephyr`, `Azure`, `ChibiOS`, `NuttX` (list
+  yours with `ls <JLink>/GDBServer/RTOSPlugin_*`; pass the name without
+  the `RTOSPlugin_` prefix). Requirements
   verified in practice: the ELF with RTOS symbols must be passed via
   `--binary`; tasks appear in `gdb-cli threads` when the scheduler is
   running (run past `vTaskStartScheduler()`). Caveat: the official
