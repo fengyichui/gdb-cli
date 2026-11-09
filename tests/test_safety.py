@@ -91,6 +91,11 @@ class TestReadonlySafetyLevel(unittest.TestCase):
             allowed, reason = self.sf.filter_command(cmd)
             self.assertFalse(allowed, f"'{cmd}' should be blocked")
 
+    def test_blocks_monitor_commands(self):
+        for cmd in ("monitor reset", "monitor go"):
+            allowed, reason = self.sf.filter_command(cmd)
+            self.assertFalse(allowed, f"'{cmd}' should be blocked")
+
     def test_blocks_call_commands(self):
         for cmd in ("call foo()", "call malloc(100)"):
             allowed, reason = self.sf.filter_command(cmd)
@@ -122,6 +127,12 @@ class TestReadwriteSafetyLevel(unittest.TestCase):
         for cmd in ("set variable x=1", "set var y=2", "assign z=3"):
             allowed, reason = self.sf.filter_command(cmd)
             self.assertTrue(allowed, f"'{cmd}' should be allowed, got: {reason}")
+
+    def test_monitor_allowed_at_readwrite(self):
+        # `monitor` forwards stub commands (J-Link reset/go/halt) — target
+        # control, so readwrite is the minimum level.
+        allowed, reason = self.sf.filter_command("monitor reset")
+        self.assertTrue(allowed, f"monitor should be allowed, got: {reason}")
 
     def test_blocks_call_commands(self):
         for cmd in ("call foo()", "call danger()"):

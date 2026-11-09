@@ -49,6 +49,9 @@ EXECUTION_COMMANDS: Set[str] = {
 # 写入类命令（需要 READWRITE 或 FULL 模式）
 WRITE_COMMANDS: Set[str] = {
     "set", "assign",
+    # `monitor` forwards commands to the remote stub (e.g. J-Link reset/go/
+    # halt/flash-erase) — it controls the target, so it needs write level.
+    "monitor",
 }
 
 # 函数调用类命令（需要 FULL 模式）

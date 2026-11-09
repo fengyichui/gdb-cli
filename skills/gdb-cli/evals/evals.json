@@ -56,6 +56,14 @@
       "expected_output": "Should use 'gdb-cli jlink stop --all' (or --jlink-id) which stops the GDB session AND the JLinkGDBServer, and verify no leftover instances; plain 'gdb-cli stop -s <id>' alone is insufficient for this request",
       "files": [],
       "assertions": []
+    },
+    {
+      "id": 8,
+      "name": "jlink-rtos-freertos",
+      "prompt": "My firmware at ./fw.elf runs FreeRTOS on an OM6628X behind a J-Link probe (nickname LIQIANG1). I want to see the RTOS tasks while debugging.",
+      "expected_output": "Should start with 'gdb-cli jlink -d OM6628X --select usb=LIQIANG1 --binary ./fw.elf --gdb-path <gdb> --extra-arg -rtos --extra-arg GDBServer/RTOSPlugin_FreeRTOS' (GDBServer/ prefix required on Linux), then list tasks via 'gdb-cli threads -s <id>'; mention tasks appear once the scheduler is running, and that monitor control (reset/go/halt) needs --allow-write",
+      "files": [],
+      "assertions": []
     }
   ]
 }
