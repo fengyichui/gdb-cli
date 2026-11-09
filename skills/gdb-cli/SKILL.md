@@ -124,9 +124,10 @@ Embedded notes: registers are architecture-aware (`pc/sp/lr/xpsr` on
 Cortex-M); `eval` does not auto-dereference pointers by default
 (MMIO-safe) — use `eval --deref` to opt in; the J-Link `monitor` commands
 (reset/go/halt/regs) are available via
-`gdb-cli exec -s $SESSION "monitor reset"` but REQUIRE the
-`--allow-write` session level; to leave the target running
-when stopping, use `gdb-cli stop -s $SESSION --before-detach "monitor go"`.
+`gdb-cli exec -s $SESSION "monitor reset"` by default (no filtering);
+with `--safe`, they require `--safe --allow-write`. To leave the target
+running when stopping, use
+`gdb-cli stop -s $SESSION --before-detach "monitor go"`.
 
 **For a target running on a remote host and port (server ALREADY running —
 e.g. a JLinkGDBServer you started yourself, or one left listening after a

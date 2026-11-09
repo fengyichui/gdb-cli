@@ -130,7 +130,7 @@ ZH_CN_CATALOG = {
     # === exec command ===
     "cli.exec.doc": "执行原始 GDB 命令",
     "cli.exec.session_help": "会话 ID",
-    "cli.exec.safety_level_help": "安全级别 (readonly/readwrite/full)",
+    "cli.exec.safety_level_help": "安全级别 (off/readonly/readwrite/full)",
 
     # === stop command ===
     "cli.stop.doc": "停止会话，安全退出 GDB",
@@ -221,8 +221,9 @@ ZH_CN_CATALOG = {
     "cli.jlink.status.doc": "查看 JLinkGDBServer 实例状态",
     "cli.jlink.devices.doc": "列出已连接的 J-Link 调试器",
     "cli.safe_help": (
-        "启用安全过滤（readonly 会话：拦截写入、monitor 命令、函数调用；"
-        "默认关闭——会话默认拥有完全权限，需要时显式传 --safe）"
+        "启用安全过滤（默认 off = 不做任何命令检查）。加 --safe 后会话从 "
+        "readonly 开始，并额外拦截宿主代码执行命令（source/python/shell）"
+        "和多行输入；--allow-write/--allow-call 逐级放宽目标操作。"
     ),
     "cli.jlink.device_help": "目标设备名（如 nRF54L15_M33）",
     "cli.jlink.select_help": "调试器选择器：usb=<序号|昵称> 或 ip=HOST:PORT",

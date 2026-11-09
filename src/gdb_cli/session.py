@@ -45,7 +45,7 @@ class SessionMeta:
     started_at: float = field(default_factory=time.time)
     last_active: float = field(default_factory=time.time)
     heartbeat_timeout: int = 600       # 心跳超时秒数
-    safety_level: str = "readonly"     # "readonly" | "readwrite" | "full"
+    safety_level: str = "readonly"     # "off" | "readonly" | "readwrite" | "full"
 
     def to_dict(self) -> dict:
         """转换为字典"""

@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- Sessions started without `--safe` now use `safety_level=off`: no command
+  filtering at all. `source`, `python`, `shell`, multi-line input and
+  lifecycle commands are accepted; this deliberately reintroduces arbitrary
+  host-code execution for default sessions.
+- `--safe` remains the only way to enable the filter. `--safe` starts at
+  readonly; `--allow-write`/`--allow-call` relax target operations to
+  readwrite/full, while host-code commands and multi-line input stay blocked.
+- `jlink --rtos` lists the supported RTOS plugins in all locales without
+  exposing the internal plugin path.
+
 ## [0.4.0] - 2026-11-09
 
 ### Added

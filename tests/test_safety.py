@@ -62,9 +62,13 @@ class TestForbiddenCommands(unittest.TestCase):
             self.assertFalse(allowed, f"'{cmd}' should be blocked")
 
     def test_signal_blocked(self):
-        """signal is blocked at all levels."""
+        """signal is blocked at all filtered levels."""
         for cmd in ("signal", "signal SIGCONT", "signal 9"):
-            for level in SafetyLevel:
+            for level in (
+                SafetyLevel.READONLY,
+                SafetyLevel.READWRITE,
+                SafetyLevel.FULL,
+            ):
                 sf = SafetyFilter(level)
                 allowed, _ = sf.filter_command(cmd)
                 self.assertFalse(
@@ -265,11 +269,51 @@ class TestSafetyEdgeCases(unittest.TestCase):
         self.assertNotIn("source", READONLY_COMMANDS)
 
 
-class TestMultilineAndSource(unittest.TestCase):
-    """Multi-line commands and `source` must always be rejected."""
+class TestOffSafetyLevel(unittest.TestCase):
+    """``off`` disables all command filtering (default sessions)."""
 
-    def test_multiline_rejected_at_all_levels(self):
-        for level in SafetyLevel:
+    def setUp(self):
+        self.sf = SafetyFilter(SafetyLevel.OFF)
+
+    def test_allows_everything(self):
+        commands = (
+            "bt",
+            "set $r0 = 1",
+            "call foo()",
+            "source /tmp/x.gdb",
+            "python print(1)",
+            "python-interactive",
+            "shell ls",
+            "quit",
+            "kill",
+            "detach",
+            "attach 12345",
+            "target extended-remote :3333",
+            "signal 9",
+            "bt\npython print(1)",
+            "bt\nshell id",
+        )
+        for cmd in commands:
+            with self.subTest(command=cmd):
+                result = self.sf.check_command(cmd)
+                self.assertTrue(result.allowed)
+                self.assertIsNone(result.reason)
+
+    def test_convenience_function(self):
+        self.assertTrue(is_command_allowed("python print(1)", "off"))
+        self.assertTrue(is_command_allowed("source /tmp/x.gdb", "off"))
+        self.assertTrue(is_command_allowed("bt\nshell id", "off"))
+
+
+class TestMultilineAndSource(unittest.TestCase):
+    """Multi-line commands and `source` are rejected while filtering."""
+
+    def test_multiline_rejected_when_filtering(self):
+        for level in (
+            SafetyLevel.READONLY,
+            SafetyLevel.READWRITE,
+            SafetyLevel.FULL,
+        ):
             sf = SafetyFilter(level)
             for cmd in ("bt\nshell ls", "print x\r\nset $r0=1", "bt\rfoo"):
                 with self.subTest(level=level, command=cmd):
@@ -285,8 +329,12 @@ class TestMultilineAndSource(unittest.TestCase):
         self.assertFalse(allowed)
         self.assertEqual(reason, "multi-line commands are not allowed")
 
-    def test_source_blocked_at_all_levels(self):
-        for level in SafetyLevel:
+    def test_source_blocked_when_filtering(self):
+        for level in (
+            SafetyLevel.READONLY,
+            SafetyLevel.READWRITE,
+            SafetyLevel.FULL,
+        ):
             for cmd in ("source /tmp/evil.gdb", "source"):
                 with self.subTest(level=level, command=cmd):
                     self.assertFalse(
@@ -326,6 +374,12 @@ class TestWrappedCommand(unittest.TestCase):
             "thread apply 1,3 shell ls", SafetyLevel.FULL
         )
         self.assertFalse(result.allowed)
+
+    def test_thread_apply_allowed_in_off(self):
+        result = check_wrapped_command(
+            "thread apply 1,3 python print(1)", SafetyLevel.OFF
+        )
+        self.assertTrue(result.allowed)
 
     def test_check_command_also_unwraps(self):
         sf = SafetyFilter(SafetyLevel.READONLY)

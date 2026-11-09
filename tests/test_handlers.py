@@ -97,6 +97,29 @@ class TestHandleExec(unittest.TestCase):
         result = self.handlers.handle_exec("target extended-remote :3333", safety_level="full")
         self.assertIn("error", result)
 
+    def test_exec_everything_allowed_in_off(self):
+        """off disables the filter entirely (default sessions)."""
+        sys.modules['gdb'].post_event = lambda fn: fn()
+        sys.modules['gdb'].execute = Mock(return_value="")
+
+        for command in (
+            "source /tmp/x.gdb",
+            "python import os",
+            "python-interactive",
+            "shell ls",
+            "quit",
+            "kill",
+            "attach 12345",
+            "detach",
+            "target extended-remote :3333",
+            "bt\npython print(1)",
+        ):
+            with self.subTest(command=command):
+                result = self.handlers.handle_exec(
+                    command, safety_level="off"
+                )
+                self.assertNotIn("error", result)
+
 
 class TestHandleThreadApply(unittest.TestCase):
     """Test thread_apply handler with safety filtering."""

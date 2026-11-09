@@ -135,7 +135,7 @@ RU_CATALOG = {
     # === exec command ===
     "cli.exec.doc": "Выполнить сырую команду GDB",
     "cli.exec.session_help": "ID сессии",
-    "cli.exec.safety_level_help": "Уровень безопасности (readonly/readwrite/full)",
+    "cli.exec.safety_level_help": "Уровень безопасности (off/readonly/readwrite/full)",
 
     # === stop command ===
     "cli.stop.doc": "Остановить сессию и безопасно выйти из GDB",
@@ -226,9 +226,11 @@ RU_CATALOG = {
     "cli.jlink.status.doc": "Показать состояние экземпляров JLinkGDBServer",
     "cli.jlink.devices.doc": "Список подключённых отладчиков J-Link",
     "cli.safe_help": (
-        "Включить фильтр безопасности (сессия readonly: блокирует запись, "
-        "команды monitor, вызовы функций; по умолчанию выключен — сессия "
-        "получает полный доступ, укажите --safe при необходимости)"
+        "Включить фильтр безопасности (по умолчанию off — команды не "
+        "проверяются). С --safe сессия начинает в readonly и дополнительно "
+        "блокирует выполнение кода на хосте (source/python/shell) и "
+        "многострочный ввод; --allow-write/--allow-call расширяют "
+        "операции с целью."
     ),
     "cli.jlink.device_help": "Имя целевого устройства (например, nRF54L15_M33)",
     "cli.jlink.select_help": "Выбор отладчика: usb=<серийный номер|никнейм> или ip=HOST:PORT",

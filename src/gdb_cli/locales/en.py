@@ -133,7 +133,7 @@ ENGLISH_CATALOG = {
     # === exec command ===
     "cli.exec.doc": "Execute raw GDB command",
     "cli.exec.session_help": "Session ID",
-    "cli.exec.safety_level_help": "Safety level (readonly/readwrite/full)",
+    "cli.exec.safety_level_help": "Safety level (off/readonly/readwrite/full)",
 
     # === stop command ===
     "cli.stop.doc": "Stop session and safely exit GDB",
@@ -224,9 +224,10 @@ ENGLISH_CATALOG = {
     "cli.jlink.status.doc": "Show JLinkGDBServer instance status",
     "cli.jlink.devices.doc": "List attached J-Link probes",
     "cli.safe_help": (
-        "Enable the safety filter (readonly session: blocks writes, monitor "
-        "commands, function calls; default off — sessions start with full "
-        "access unless --safe is given)"
+        "Enable the safety filter (default off = no command filtering). "
+        "With --safe, sessions start readonly and also block host-code "
+        "commands (source/python/shell) and multi-line input; "
+        "--allow-write/--allow-call relax target operations."
     ),
     "cli.jlink.device_help": "Target device name (e.g. nRF54L15_M33)",
     "cli.jlink.select_help": "Probe selector: usb=<serial|nickname> or ip=HOST:PORT",

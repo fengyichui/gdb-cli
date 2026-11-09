@@ -28,6 +28,7 @@ SOCKET_WAIT_TIMEOUT = 30.0
 # GDB-level enforcement on top of the RPC handler filtering, so read-only mode
 # cannot be bypassed through raw `print`/`eval` expressions.
 _SAFETY_PERMISSIONS = {
+    "off": ("on", "on", "on"),
     "readonly": ("off", "off", "off"),
     "readwrite": ("on", "on", "off"),
     "full": ("on", "on", "on"),
@@ -189,8 +190,8 @@ def launch_attach(
     if allow_write and not allow_call:
         safety_level = "readwrite"
     if safety == "full":
-        # User explicitly opted out of the safety restrictions: full access.
-        safety_level = "full"
+        # User explicitly opted out of the safety filter: no command checks.
+        safety_level = "off"
 
     session = create_session(
         mode="attach",
@@ -279,8 +280,8 @@ def launch_target(
     if allow_write and not allow_call:
         safety_level = "readwrite"
     if safety == "full":
-        # User explicitly opted out of the safety restrictions: full access.
-        safety_level = "full"
+        # User explicitly opted out of the safety filter: no command checks.
+        safety_level = "off"
 
     session = create_session(
         mode="target",

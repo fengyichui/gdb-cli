@@ -220,8 +220,6 @@ gdb-cli eval-element -s <session> <expr> --index <N>
 
 ```
 gdb-cli exec -s <session> <command>
-
-  --safety-level    Safety level (readonly / readwrite / full)
 ```
 
 ### thread-apply — Batch Thread Operations
@@ -274,15 +272,20 @@ gdb-cli thread-apply -s <session> <command> --threads "1,3,5"
 
 ## Security Mechanisms
 
-### Command Whitelist (Attach Mode)
+### Command Filter (attach / target / jlink)
 
-| Safety Level | Allowed Commands |
-|--------------|------------------|
-| `readonly` (default) | bt, info, print, threads, locals, frame |
-| `readwrite` | + set variable |
-| `full` | + call, continue, step, next |
+| Safety level | Behavior |
+|--------------|----------|
+| `off` (default) | No command filtering. Includes `source`, `python`, `shell` and multi-line input. |
+| `readonly` (`--safe`) | bt, info, print, threads, locals, frame |
+| `readwrite` (`--safe --allow-write`) | + set, monitor |
+| `full` (`--safe --allow-call`) | + call, continue, step, next |
 
-`quit`, `kill`, `shell`, `signal` are always blocked.
+The filter is only enabled by `--safe`. While enabled, `quit`, `kill`,
+`shell`, `signal`, `python`, `python-interactive`, `source`, `detach`,
+`attach`, `target` and multi-line commands are always blocked. With the
+default `off` level these commands run unfiltered, so `exec "quit"` or
+`exec "kill"` can terminate the session or inferior.
 
 ### Heartbeat Timeout
 

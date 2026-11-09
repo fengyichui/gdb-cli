@@ -152,7 +152,7 @@ class TestSafetyLevelPropagation(unittest.TestCase):
     def test_server_meta_contains_safety_level(self, mock_create_session, mock_start):
         from gdb_cli.launcher import launch_target
 
-        for level in ("readonly", "readwrite", "full"):
+        for level in ("off", "readonly", "readwrite", "full"):
             with self.subTest(level=level):
                 mock_start.reset_mock()
                 mock_create_session.return_value = _make_session(
@@ -172,6 +172,11 @@ class TestSafetyLevelPropagation(unittest.TestCase):
 
 class TestSafetyCommands(unittest.TestCase):
     EXPECTED = {
+        "off": [
+            "set may-write-memory on",
+            "set may-write-registers on",
+            "set may-call-functions on",
+        ],
         "readonly": [
             "set may-write-memory off",
             "set may-write-registers off",
@@ -216,6 +221,27 @@ class TestSafetyCommands(unittest.TestCase):
                     ],
                 )
                 self.assertEqual(commands[3:6], expected)
+
+    @patch("gdb_cli.launcher._start_gdb_process")
+    @patch("gdb_cli.launcher.create_session")
+    def test_no_safe_maps_to_off_level(
+        self, mock_create_session, mock_start
+    ):
+        from gdb_cli.launcher import launch_target
+
+        mock_create_session.side_effect = lambda **kwargs: _make_session(
+            mode=kwargs["mode"],
+            remote=kwargs.get("remote"),
+            safety_level=kwargs["safety_level"],
+        )
+
+        launch_target(remote="127.0.0.1:1234", safety="full")
+
+        self.assertEqual(
+            mock_create_session.call_args.kwargs["safety_level"], "off"
+        )
+        commands = _extract_commands(mock_start)
+        self.assertEqual(commands[3:6], self.EXPECTED["off"])
 
     @patch("gdb_cli.launcher._start_gdb_process")
     @patch("gdb_cli.launcher.create_session")

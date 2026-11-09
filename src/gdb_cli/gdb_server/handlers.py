@@ -621,7 +621,7 @@ def handle_exec(
 
     Args:
         command: GDB 命令
-        safety_level: 安全级别 ("readonly", "readwrite", "full")
+        safety_level: 安全级别 ("off", "readonly", "readwrite", "full")
 
     Returns:
         {"output": "...", "command": "..."}

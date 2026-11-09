@@ -1,7 +1,8 @@
 """
 Safety Module - 命令安全过滤
 
-实现命令白名单过滤，区分不同安全级别。
+实现命令白名单过滤，区分不同安全级别。``OFF`` 完全关闭过滤（默认会话），
+``READONLY``/``READWRITE``/``FULL`` 在 `--safe` 下启用。
 """
 
 
@@ -12,9 +13,10 @@ from typing import Any, Optional, Set, Tuple
 
 class SafetyLevel(Enum):
     """安全级别"""
+    OFF = "off"                # 完全关闭过滤（默认会话）
     READONLY = "readonly"      # 只读模式，只允许读取命令
     READWRITE = "readwrite"    # 读写模式，允许内存修改
-    FULL = "full"              # 完全模式，允许函数调用
+    FULL = "full"              # 完全模式，允许目标侧写入/调用
 
 
 @dataclass
@@ -59,7 +61,7 @@ CALL_COMMANDS: Set[str] = {
     "call",
 }
 
-# 始终禁止的命令
+# 过滤启用时始终禁止的命令（SafetyLevel.OFF 不做任何检查）
 FORBIDDEN_COMMANDS: Set[str] = {
     "quit", "kill", "shell", "python-interactive", "python",
     "signal", "detach", "attach", "target",
@@ -95,6 +97,16 @@ class SafetyFilter:
         Returns:
             CommandCheckResult 检查结果
         """
+        # OFF disables the filter completely.  This is the default for
+        # sessions started without --safe, and it intentionally includes
+        # multi-line input, `source`, `python`, `shell` and lifecycle
+        # commands (`quit`, `kill`, ...).
+        if self.level == SafetyLevel.OFF:
+            return CommandCheckResult(
+                allowed=True,
+                category="unrestricted",
+            )
+
         # Reject multi-line input: a second line would bypass the verb check
         # entirely because only the first token is inspected below.
         if "\n" in command or "\r" in command:
@@ -250,7 +262,9 @@ def check_wrapped_command(apply_cmd: str, level: Any) -> CommandCheckResult:
     else:
         safety_level = level
 
-    if "\n" in apply_cmd or "\r" in apply_cmd:
+    if safety_level != SafetyLevel.OFF and (
+        "\n" in apply_cmd or "\r" in apply_cmd
+    ):
         return CommandCheckResult(
             allowed=False,
             category="forbidden",
