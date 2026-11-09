@@ -103,19 +103,23 @@ gdb-cli jlink -d <device_name> --select usb=<sn> --binary <fw.elf> \
   JLinkGDBServer args pass through `--extra-arg` (e.g. `--extra-arg -rtos
   --extra-arg FreeRTOS`), but `-select/-port/-device/-if/-gui/-nogui` are
   reserved.
-- **RTOS thread awareness** (FreeRTOS/embOS/Zephyr/ChibiOS/Azure/NuttX):
+- **RTOS thread awareness** (FreeRTOS/embOS/Zephyr/Azure/ChibiOS/NuttX):
   JLinkGDBServer loads an RTOS plugin and exposes RTOS tasks as GDB
   threads. Enable via `--extra-arg -rtos --extra-arg
   GDBServer/RTOSPlugin_FreeRTOS` (plugin path is relative to the J-Link
   install root; bare `FreeRTOS` does NOT work on Linux because the
   plugins live in the `GDBServer/` subdirectory — always use the
-  `GDBServer/RTOSPlugin_<name>` form). Requirements verified in practice:
-  the ELF with RTOS symbols must be passed via `--binary`; tasks appear
-  in `gdb-cli threads` when the scheduler is running (run past
-  `vTaskStartScheduler()`). Caveat: the official FreeRTOS plugin may not
-  enumerate tasks on TrustZone non-secure FreeRTOS ports
-  (ARM_CM33/non_secure) — symptoms: `threads` shows a single thread with
-  `Thread 57005` (0xDEAD) even though `uxCurrentNumberOfTasks > 1`.
+  `GDBServer/RTOSPlugin_<name>` form). Plugins bundled with the J-Link
+  pack: `RTOSPlugin_FreeRTOS`, `RTOSPlugin_embOS`, `RTOSPlugin_Zephyr`,
+  `RTOSPlugin_Azure`, `RTOSPlugin_ChibiOS`, `RTOSPlugin_NuttX` (list
+  yours with `ls <JLink>/GDBServer/RTOSPlugin_*`). Requirements
+  verified in practice: the ELF with RTOS symbols must be passed via
+  `--binary`; tasks appear in `gdb-cli threads` when the scheduler is
+  running (run past `vTaskStartScheduler()`). Caveat: the official
+  FreeRTOS plugin may not enumerate tasks on TrustZone non-secure
+  FreeRTOS ports (ARM_CM33/non_secure) — symptoms: `threads` shows a
+  single thread with `Thread 57005` (0xDEAD) even though
+  `uxCurrentNumberOfTasks > 1`.
 - `jlink stop` stops the GDB session AND the server. Plain
   `gdb-cli stop --session <id>` stops only the GDB session and keeps the
   server listening (useful to reconnect quickly with `gdb-cli target`).
