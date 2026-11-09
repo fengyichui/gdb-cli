@@ -155,8 +155,63 @@ ENGLISH_CATALOG = {
     "cli.env_check.doc": "Environment check: GDB version, ptrace permissions, Python version",
 
     # === jlink command group ===
-    "cli.jlink.doc": "Manage JLinkGDBServer and automatically start a GDB session",
-    "cli.jlink.start.doc": "Start JLinkGDBServer and connect GDB",
+    "cli.jlink.doc": (
+        "Manage JLinkGDBServer and automatically start a GDB session\n\n"
+        "Starts JLinkGDBServer and connects GDB in one step.\n\n"
+        "JLinkGDBServer arguments are mapped to gdb-cli options:\n"
+        "  -device DEV     -> -d, --device DEV\n"
+        "  -select SELECT  -> --select usb=<serial|nickname> | ip=HOST:PORT\n"
+        "  -if IF          -> --if SWD|JTAG\n"
+        "  -speed SPEED    -> --speed kHz (omit = auto)\n"
+        "  -port PORT      -> --port (omit = free port auto-picked)\n"
+        "  -swoport/-telnetport/-RTTTelnetPort -> --extra-arg\n"
+        "  -rtos PLUGIN    -> --extra-arg -rtos --extra-arg FreeRTOS\n"
+        "  -x/-xc FILE     -> --extra-arg -x --extra-arg <gdbinit>\n"
+        "  -jlinkscriptfile FILE -> --extra-arg\n"
+        "  -jtagconf IR,DR / -excdbg N / -powertarget N -> --extra-arg\n"
+        "  -USB <sn> / -IP <host> -> use --select instead\n"
+        "  -singlerun/-s, -noreset, -log FILE, -settingsfile FILE -> --extra-arg\n"
+        "Arguments always forced by gdb-cli (cannot be overridden):\n"
+        "  -nogui (suppress DLL dialogs), -nolocalhostonly, -halt, -nosilent,\n"
+        "  -vd, -noir, -notimeout\n"
+        "Reserved (cannot be passed via --extra-arg):\n"
+        "  -select, -port, -device, -if, -gui, -nogui\n"
+        "Run 'gdb-cli jlink start --help' for all options."
+    ),
+    "cli.jlink.start.doc": (
+        "Start JLinkGDBServer and connect GDB\n\n"
+        "Bridged JLinkGDBServer command-line options (see also the group help):\n"
+        "  -device <name>          -d/--device (mandatory; the MCU name\n"
+        "                          J-Link knows, e.g. nRF54L15_M33)\n"
+        "  -select <sel>           --select usb=<serial|nickname> | ip=HOST:PORT\n"
+        "  -if <SWD|JTAG|FINE|     --if (default SWD)\n"
+        "   2-wire-JTAG-PIC32>\n"
+        "  -speed <kHz|auto>       --speed (omit = auto-detect)\n"
+        "  -port <n>               --port (omit = auto-picked free port)\n"
+        "  -swoport <n>            --extra-arg -swoport --extra-arg <n>\n"
+        "  -telnetport <n>         --extra-arg -telnetport --extra-arg <n>\n"
+        "  -RTTTelnetPort <n>      --extra-arg -RTTTelnetPort --extra-arg <n>\n"
+        "  -rtos <plugin>          --extra-arg -rtos --extra-arg <plugin>\n"
+        "  -x <gdbinit>            --extra-arg -x --extra-arg <file>\n"
+        "  -xc <gdbinit>           --extra-arg -xc --extra-arg <file>\n"
+        "  -jlinkscriptfile <f>    --extra-arg -jlinkscriptfile --extra-arg <f>\n"
+        "  -jtagconf <IR>,<DR>     --extra-arg -jtagconf --extra-arg <IR,DR>\n"
+        "  -excdbg <nSteps>        --extra-arg -excdbg --extra-arg <n>\n"
+        "  -powertarget <delay>    --extra-arg -powertarget --extra-arg <n>\n"
+        "  -singlerun / -s         --extra-arg -singlerun\n"
+        "  -noreset                --extra-arg -noreset\n"
+        "  -log <file>             --extra-arg -log --extra-arg <file>\n"
+        "  -settingsfile <file>    --extra-arg -settingsfile --extra-arg <file>\n"
+        "  -strict                 --extra-arg -strict\n"
+        "  -JLinkDevicesXMLPath    --extra-arg (deprecated by SEGGER)\n"
+        "  -USB <sn> / -IP <h>     use --select usb=<sn> / ip=<h>:<port> instead\n"
+        "  -endian <little|big>    --extra-arg -endian --extra-arg <e>\n\n"
+        "gdb-cli always forces: -nogui -nolocalhostonly -halt -nosilent\n"
+        "  -vd -noir -notimeout (cannot be overridden).\n"
+        "Reserved via --extra-arg: -select -port -device -if -gui -nogui.\n"
+        "Any other JLinkGDBServer flag not listed passes through --extra-arg\n"
+        "verbatim (one token per --extra-arg)."
+    ),
     "cli.jlink.stop.doc": "Stop JLinkGDBServer instance(s)",
     "cli.jlink.restart.doc": "Restart a JLinkGDBServer instance (reuses persisted GDB session settings)",
     "cli.jlink.status.doc": "Show JLinkGDBServer instance status",
