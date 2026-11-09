@@ -5,6 +5,58 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-11-09
+
+### Added
+- `jlink` command group: manage JLinkGDBServer end-to-end for embedded
+  debugging — `start` (auto-start GDBServer + auto-establish GDB session,
+  strict ready verification), `stop`, `restart` (server + session
+  reconnect), `status`, `devices` (USB probe enumeration)
+- Probe selection via `--select usb=<serial|nickname>` or
+  `--select ip=<host>:<port>`; bare `usb`/`ip` and `usb=*` rejected to
+  prevent GUI dialogs on multi-probe hosts
+- `--extra-arg` passthrough for JLinkGDBServer options with reserved
+  parameter protection (`-select/-port/-device/-if/-gui/-nogui`)
+- `gdb-cli stop --before-detach` for embedded exit policies (e.g.
+  `monitor go` to leave the target running)
+- `eval --deref` opt-in pointer auto-dereference (default off, MMIO-safe)
+- `target --remote-mode` (remote | extended-remote)
+- Embedded debugging workflow in the gdb-cli skill (Step 1 J-Link entry,
+  Cortex-M HardFault pattern, J-Link eval cases)
+
+### Security
+- `--allow-write/--allow-call` now actually reach the RPC server (session
+  meta previously dropped safety_level) and are enforced at the GDB level
+  via `set may-write-memory/-registers/may-call-functions off`
+- Multi-line GDB commands rejected (second-line bypass); `source` blocked
+  at all levels; `thread apply ... <cmd>` filtered by the wrapped verb;
+  safety module unavailability is fail-closed
+- Process kill paths validate /proc starttime identity (PID reuse can no
+  longer kill innocent processes); `stop --force` required for kill
+  fallback
+
+### Fixed
+- `-ex` argument quoting broke `source`, `target extended-remote` and
+  `set` commands (remote/embedded targets could not connect at all)
+- `__file__` unavailable after GDB `source` (RPC server failed to start)
+- `handle_exec` nested `post_event` deadlocked every raw command
+- Architecture-aware default registers (armv7e-m/armv8-m.main, AArch64)
+- `Frame.find_sal()` replaces non-existent `Frame.sal()`
+- `gdb.TYPE_CODE_FLT` replaces non-existent `TYPE_CODE_FLOAT`
+- Failed connect/attach/load no longer reports "started" (launcher RPC
+  handshake + inferior check, dead ports fail fast with exit 1)
+- Handler errors now surface as `ok:false` with non-zero CLI exit codes;
+  heartbeat generation guard, correct `detach inferiors` syntax,
+  per-connection RPC threads (ping/status/stop responsive during long
+  commands), command timeout uses the configured value
+- Startup failure rollback (no GDB/JLinkGDBServer orphans), atomic
+  metadata writes, JLinkGDBServer devices enumeration exit code
+- Skill docs: stale command names (`eval-cmd`/`locals-cmd`) corrected
+
+### Tests
+- 359 unit tests (was 200); ruff clean; end-to-end verified on dual USB
+  probes (nRF54L15DK + J-Link CE) and a J-Link remote server
+
 ## [0.3.0] - 2026-04-25
 
 ### Security
