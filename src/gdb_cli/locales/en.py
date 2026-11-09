@@ -240,6 +240,11 @@ ENGLISH_CATALOG = {
     "cli.jlink.restart.doc": "Restart a JLinkGDBServer instance (reuses persisted GDB session settings)",
     "cli.jlink.status.doc": "Show JLinkGDBServer instance status",
     "cli.jlink.devices.doc": "List attached J-Link probes",
+    "cli.safe_help": (
+        "Enable the safety filter (readonly session: blocks writes, monitor "
+        "commands, function calls; default off — sessions start with full "
+        "access unless --safe is given)"
+    ),
     "cli.jlink.device_help": "Target device name (e.g. nRF54L15_M33)",
     "cli.jlink.select_help": "Probe selector: usb=<serial|nickname> or ip=HOST:PORT",
     "cli.jlink.binary_help": "Executable file path for the GDB session (optional)",

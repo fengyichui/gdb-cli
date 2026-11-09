@@ -237,6 +237,10 @@ ZH_CN_CATALOG = {
     "cli.jlink.restart.doc": "重启 JLinkGDBServer 实例（复用已保存的 GDB 会话设置）",
     "cli.jlink.status.doc": "查看 JLinkGDBServer 实例状态",
     "cli.jlink.devices.doc": "列出已连接的 J-Link 调试器",
+    "cli.safe_help": (
+        "启用安全过滤（readonly 会话：拦截写入、monitor 命令、函数调用；"
+        "默认关闭——会话默认拥有完全权限，需要时显式传 --safe）"
+    ),
     "cli.jlink.device_help": "目标设备名（如 nRF54L15_M33）",
     "cli.jlink.select_help": "调试器选择器：usb=<序号|昵称> 或 ip=HOST:PORT",
     "cli.jlink.binary_help": "GDB 会话要加载的可执行文件路径（可选）",

@@ -246,6 +246,7 @@ class TestCLIAsyncBehavior(unittest.TestCase):
                 timeout=600,
                 allow_write=False,
                 allow_call=False,
+                safety=False,
                 gdb_path="gdb",
             )
 
@@ -265,6 +266,7 @@ class TestCLIAsyncBehavior(unittest.TestCase):
                     timeout=600,
                     allow_write=False,
                     allow_call=False,
+                    safety=False,
                     gdb_path="gdb",
                 )
 

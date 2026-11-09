@@ -161,7 +161,8 @@ def launch_attach(
     timeout: int = 600,
     allow_write: bool = False,
     allow_call: bool = False,
-    gdb_path: str = "gdb"
+    gdb_path: str = "gdb",
+    safety: str = "on"
 ) -> GDBProcess:
     """
     启动 Attach 模式 GDB 进程
@@ -187,6 +188,9 @@ def launch_attach(
     safety_level = "full" if (allow_write or allow_call) else "readonly"
     if allow_write and not allow_call:
         safety_level = "readwrite"
+    if safety == "full":
+        # User explicitly opted out of the safety restrictions: full access.
+        safety_level = "full"
 
     session = create_session(
         mode="attach",
@@ -248,7 +252,8 @@ def launch_target(
     allow_write: bool = False,
     allow_call: bool = False,
     gdb_path: str = "gdb",
-    remote_mode: str = "extended-remote"
+    remote_mode: str = "extended-remote",
+    safety: str = "on"
 ) -> GDBProcess:
     """
     Args:
@@ -273,6 +278,9 @@ def launch_target(
     safety_level = "full" if (allow_write or allow_call) else "readonly"
     if allow_write and not allow_call:
         safety_level = "readwrite"
+    if safety == "full":
+        # User explicitly opted out of the safety restrictions: full access.
+        safety_level = "full"
 
     session = create_session(
         mode="target",
