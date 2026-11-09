@@ -1063,7 +1063,8 @@ def _resolve_instance_id(instance_id: Optional[str]) -> str:
     return instances[0].instance_id
 
 
-@main.group(invoke_without_command=True, help=t("cli.jlink.doc"))
+@main.group(invoke_without_command=True, help=t("cli.jlink.doc"),
+            epilog=t("cli.jlink.epilog"))
 @_jlink_start_options
 def jlink(
     device: Optional[str],
@@ -1106,7 +1107,7 @@ def jlink(
     )
 
 
-@jlink.command("start", help=t("cli.jlink.start.doc"))
+@jlink.command("start", help=t("cli.jlink.start.doc"), epilog=t("cli.jlink.start_epilog"))
 @_jlink_start_options
 def jlink_start(
     device: Optional[str],
