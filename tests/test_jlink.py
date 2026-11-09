@@ -708,6 +708,33 @@ class TestJLinkCLI(unittest.TestCase):
             "GDBServer/RTOSPlugin_FreeRTOS"
         )
 
+    def test_start_warns_when_probe_already_in_use(self):
+        ctx = _FakeContext(invoked_subcommand=None)
+        _FakeClick._context = ctx
+        fake_process = types.SimpleNamespace(
+            session=types.SimpleNamespace(
+                session_id="sess1234", sock_path="/tmp/fake.sock"
+            )
+        )
+        existing = types.SimpleNamespace(
+            instance_id="old12345", port=5000, select="usb=1", running=True,
+        )
+
+        with patch.object(self.cli, "list_instances",
+                          return_value=[existing]), \
+             patch.object(self.cli, "start_gdbserver",
+                          return_value=self._instance()), \
+             patch.object(self.cli, "launch_target", return_value=fake_process), \
+             patch.object(self.cli, "_wait_session_ready",
+                          return_value={"state": "ready"}), \
+             patch.object(self.cli, "_save_instance"), \
+             patch.object(self.cli, "print_json") as mock_print:
+            self._call_jlink()
+
+        payload = mock_print.call_args.args[0]
+        self.assertIn("warning", payload)
+        self.assertIn("old12345", payload["warning"])
+
     def test_invalid_rtos_name_exits_before_start(self):
         ctx = _FakeContext(invoked_subcommand=None)
         _FakeClick._context = ctx

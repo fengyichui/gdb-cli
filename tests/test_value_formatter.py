@@ -231,6 +231,15 @@ class TestAutoDeref(_FormatterTestBase):
 
         self.assertEqual(result["string"], "hi")
 
+    def test_c_char_int_pointer_formats_as_string(self):
+        # Modern GDB reports C `char` with TYPE_CODE_INT, not CHAR.
+        target = _AdvType(self.stub.TYPE_CODE_INT, name="char", sizeof=1)
+        val = _PointerValue(0x2000, target, string_value="hi\x00zzz")
+
+        result = value_formatter.format_gdb_value(val, auto_deref=True)
+
+        self.assertEqual(result["string"], "hi")
+
 
 class TestCharArrayCString(_FormatterTestBase):
     def test_c_char_int_array_formats_as_string(self):

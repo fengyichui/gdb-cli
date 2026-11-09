@@ -121,6 +121,49 @@ class TestHandleExec(unittest.TestCase):
                 self.assertNotIn("error", result)
 
 
+class TestHandlePtype(unittest.TestCase):
+    """ptype must accept type names as well as value expressions."""
+
+    def setUp(self):
+        import importlib
+
+        import gdb_cli.gdb_server.handlers as handlers_mod
+        importlib.reload(handlers_mod)
+        self.handlers = handlers_mod
+        self.gdb = sys.modules['gdb']
+
+    @staticmethod
+    def _fake_type():
+        fake = SimpleNamespace(code=0, sizeof=4, name='TCB_t')
+        fake.strip_typedefs = lambda: fake
+        fake.fields = lambda: []
+        return fake
+
+    def test_type_name_uses_lookup_type(self):
+        fake = self._fake_type()
+        self.gdb.lookup_type = Mock(return_value=fake)
+        self.gdb.parse_and_eval = Mock()
+
+        result = self.handlers.handle_ptype("TCB_t")
+
+        self.gdb.lookup_type.assert_called_once_with("TCB_t")
+        self.gdb.parse_and_eval.assert_not_called()
+        self.assertEqual(result["expression"], "TCB_t")
+        self.assertNotIn("error", result)
+
+    def test_expression_falls_back_to_parse_and_eval(self):
+        fake = self._fake_type()
+        self.gdb.lookup_type = Mock(side_effect=RuntimeError("not a type"))
+        self.gdb.parse_and_eval = Mock(
+            return_value=SimpleNamespace(type=fake)
+        )
+
+        result = self.handlers.handle_ptype("pxCurrentTCB")
+
+        self.gdb.parse_and_eval.assert_called_once_with("pxCurrentTCB")
+        self.assertNotIn("error", result)
+
+
 class TestHandleThreadApply(unittest.TestCase):
     """Test thread_apply handler with safety filtering."""
 

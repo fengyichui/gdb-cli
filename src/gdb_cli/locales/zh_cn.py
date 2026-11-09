@@ -254,6 +254,10 @@ ZH_CN_CATALOG = {
     ),
     "cli.jlink.device_required": "缺少 --device（JLinkGDBServer 必须指定设备名）",
     "cli.jlink.port_busy": "端口 {port} 已被占用",
+    "cli.jlink.probe_in_use_warning": (
+        "探针 {select} 已被 J-Link 实例 {instance_id} 使用（端口 {port}）；"
+        "如非本意请先停止该实例"
+    ),
     "cli.jlink.no_instance": "未找到 J-Link 实例: {instance_id}",
     "cli.jlink.ambiguous_instance": "存在多个 J-Link 实例，请使用 --jlink-id: {instances}",
     "cli.jlink.start_failed": "JLinkGDBServer 启动失败",

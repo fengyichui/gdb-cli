@@ -1186,6 +1186,10 @@ def jlink_start(
 
     jlink_id = uuid.uuid4().hex[:8]
     log_path = str(JLINK_DIR / f"{jlink_id}.log")
+    duplicate_probes = [
+        existing for existing in list_instances()
+        if existing.running and existing.select == select
+    ]
 
     try:
         instance = start_gdbserver(cmdline, log_path, instance_id=jlink_id)
@@ -1216,14 +1220,23 @@ def jlink_start(
             raise
         raise click.exceptions.Exit(1) from exc
 
-    print_json({
+    payload = {
         "jlink_id": instance.instance_id,
         "port": instance.port,
         "device": instance.device,
         "select": instance.select,
         "session_id": session_id,
         "status": "started",
-    })
+    }
+    if duplicate_probes:
+        first = duplicate_probes[0]
+        payload["warning"] = t(
+            "cli.jlink.probe_in_use_warning",
+            select=select,
+            instance_id=first.instance_id,
+            port=first.port,
+        )
+    print_json(payload)
 
 
 @jlink.command("stop", help=t("cli.jlink.stop.doc"))

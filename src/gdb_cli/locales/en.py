@@ -259,6 +259,10 @@ ENGLISH_CATALOG = {
     ),
     "cli.jlink.device_required": "Missing --device (JLinkGDBServer requires a device name)",
     "cli.jlink.port_busy": "Port {port} is already in use",
+    "cli.jlink.probe_in_use_warning": (
+        "Probe {select} is already used by J-Link instance {instance_id} "
+        "(port {port}); stop it first if this is unintended"
+    ),
     "cli.jlink.no_instance": "J-Link instance not found: {instance_id}",
     "cli.jlink.ambiguous_instance": (
         "Multiple J-Link instances are running; use --jlink-id: {instances}"

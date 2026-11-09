@@ -18,6 +18,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `jlink --rtos` lists the supported RTOS plugins in all locales without
   exposing the internal plugin path.
 
+### Fixed
+- `ptype` accepts type names (`TCB_t`, `struct tskTaskControlBlock`) by
+  resolving them with `gdb.lookup_type` before falling back to expression
+  evaluation.
+- `eval --deref` formats `char*` as a string when GDB reports C `char` as
+  `TYPE_CODE_INT` instead of `TYPE_CODE_CHAR`.
+- `jlink` warns when another running instance already uses the same probe
+  selector, instead of silently starting a second GDBServer on that probe.
+
 ## [0.4.0] - 2026-11-09
 
 ### Added

@@ -345,8 +345,8 @@ def _format_pointer(
         if not auto_deref:
             return result
 
-        # char* 作为字符串处理
-        if target_type.code == gdb.TYPE_CODE_CHAR:
+        # char* 作为字符串处理（现代 GDB 可能把 char 报为 TYPE_CODE_INT）
+        if _is_c_char_type(target_type):
             try:
                 str_val = val.string(encoding="utf-8", errors="replace", length=max_string_len)
                 str_val = str_val.split("\x00", 1)[0]

@@ -262,6 +262,10 @@ RU_CATALOG = {
     ),
     "cli.jlink.device_required": "Не указан --device (JLinkGDBServer требует имя устройства)",
     "cli.jlink.port_busy": "Порт {port} уже используется",
+    "cli.jlink.probe_in_use_warning": (
+        "Отладчик {select} уже используется экземпляром J-Link "
+        "{instance_id} (порт {port}); остановите его, если это не требуется"
+    ),
     "cli.jlink.no_instance": "Экземпляр J-Link не найден: {instance_id}",
     "cli.jlink.ambiguous_instance": "Запущено несколько экземпляров J-Link; используйте --jlink-id: {instances}",
     "cli.jlink.start_failed": "Не удалось запустить JLinkGDBServer",

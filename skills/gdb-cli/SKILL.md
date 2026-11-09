@@ -107,12 +107,14 @@ gdb-cli jlink -d <device_name> --select usb=<sn> --binary <fw.elf> \
   `FreeRTOS`, `embOS`, `Zephyr`, `Azure`, `ChibiOS`, `NuttX`.
   Requirements
   verified in practice: the ELF with RTOS symbols must be passed via
-  `--binary`; tasks appear in `gdb-cli threads` when the scheduler is
-  running (run past `vTaskStartScheduler()`). Caveat: the official
-  FreeRTOS plugin may not enumerate tasks on TrustZone non-secure
-  FreeRTOS ports (ARM_CM33/non_secure) — symptoms: `threads` shows a
-  single thread with `Thread 57005` (0xDEAD) even though
-  `uxCurrentNumberOfTasks > 1`.
+  `--binary`; tasks appear in `gdb-cli threads` once the scheduler is
+  running (past `vTaskStartScheduler()`). If the target is halted at
+  reset/boot, `threads` can show a single `Thread 57005` (0xDEAD) even
+  though `uxCurrentNumberOfTasks > 1`; let it run (`continue&` then
+  `interrupt`, or `monitor go` then `monitor halt`) and query again.
+  Verified on OM6628X (ARM_CM33 non-secure): after the scheduler starts,
+  `threads` lists IDLE/shell/Tmr Svc/No Name with priorities, and
+  per-thread `bt` works.
 - `jlink stop` stops the GDB session AND the server. Plain
   `gdb-cli stop --session <id>` stops only the GDB session and keeps the
   server listening (useful to reconnect quickly with `gdb-cli target`).

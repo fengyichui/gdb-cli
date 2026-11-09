@@ -1227,10 +1227,14 @@ def handle_ptype(
     **kwargs
 ) -> dict:
     """
-    查看表达式的类型信息（替代 ptype EXPR）
+    查看类型名或表达式的类型信息
+
+    ``expr`` may be a type name (``TCB_t``, ``struct foo``) or a value
+    expression (``pxCurrentTCB``).  Type names are resolved with
+    ``gdb.lookup_type`` first; expressions fall back to ``parse_and_eval``.
 
     Args:
-        expr: C/C++ 表达式
+        expr: C/C++ 类型名或表达式
 
     Returns:
         {"expression": "...", "type": "...", "sizeof": N, ...}
@@ -1239,8 +1243,10 @@ def handle_ptype(
         return {"error": "GDB not available"}
 
     try:
-        val = gdb.parse_and_eval(expr)
-        val_type = val.type
+        try:
+            val_type = gdb.lookup_type(expr)
+        except Exception:
+            val_type = gdb.parse_and_eval(expr).type
 
         result = {
             "expression": expr,
