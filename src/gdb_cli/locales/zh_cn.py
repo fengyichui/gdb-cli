@@ -203,7 +203,7 @@ ZH_CN_CATALOG = {
         "                          --extra-arg -rtos\n"
         "                          --extra-arg GDBServer/RTOSPlugin_FreeRTOS\n"
         "                          ——裸写 'FreeRTOS' 无法解析）\n"
-        "                          内置插件（V8.88）：\n"
+        "                          可用插件：\n"
         "                          GDBServer/RTOSPlugin_FreeRTOS\n"
         "                          GDBServer/RTOSPlugin_embOS\n"
         "                          GDBServer/RTOSPlugin_Zephyr\n"

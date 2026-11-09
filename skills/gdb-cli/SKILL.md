@@ -109,8 +109,8 @@ gdb-cli jlink -d <device_name> --select usb=<sn> --binary <fw.elf> \
   GDBServer/RTOSPlugin_FreeRTOS` (plugin path is relative to the J-Link
   install root; bare `FreeRTOS` does NOT work on Linux because the
   plugins live in the `GDBServer/` subdirectory — always use the
-  `GDBServer/RTOSPlugin_<name>` form). Plugins bundled with the J-Link
-  pack: `RTOSPlugin_FreeRTOS`, `RTOSPlugin_embOS`, `RTOSPlugin_Zephyr`,
+  `GDBServer/RTOSPlugin_<name>` form). Available plugins:
+  `RTOSPlugin_FreeRTOS`, `RTOSPlugin_embOS`, `RTOSPlugin_Zephyr`,
   `RTOSPlugin_Azure`, `RTOSPlugin_ChibiOS`, `RTOSPlugin_NuttX` (list
   yours with `ls <JLink>/GDBServer/RTOSPlugin_*`). Requirements
   verified in practice: the ELF with RTOS symbols must be passed via

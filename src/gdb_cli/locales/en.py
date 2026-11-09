@@ -206,7 +206,7 @@ ENGLISH_CATALOG = {
         "                          --extra-arg -rtos\n"
         "                          --extra-arg GDBServer/RTOSPlugin_FreeRTOS\n"
         "                          — bare 'FreeRTOS' fails to resolve)\n"
-        "                          Bundled plugins (V8.88):\n"
+        "                          Available plugins:\n"
         "                          GDBServer/RTOSPlugin_FreeRTOS\n"
         "                          GDBServer/RTOSPlugin_embOS\n"
         "                          GDBServer/RTOSPlugin_Zephyr\n"
