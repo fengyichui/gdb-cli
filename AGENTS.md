@@ -46,5 +46,5 @@ CI (`.github/workflows/ci.yml`) runs `ruff check src/ tests/` then `pytest tests
 ## Hardware verification context (when a J-Link probe is attached)
 
 - Probe serial `69406159` (nickname `LIQIANG1`, J-Link CE) → OM6628X board, FreeRTOS firmware at `/home/liqiang/work/sdk28ble/a.axf`; second probe `1057723511` → nRF54L15DK.
-- Use `--gdb-path /usr/bin/gdb-multiarch` (host `gdb` lacks ARM support). RTOS thread awareness: `--rtos FreeRTOS`; tasks only enumerate after the scheduler has run (halted-at-reset targets show one dummy `Thread 57005`).
+- Use `--gdb-path /usr/bin/gdb-multiarch` (host `gdb` lacks ARM support). RTOS thread awareness: `--rtos FreeRTOS`; tasks only enumerate after the scheduler has run (halted-at-reset targets show one dummy `Thread 57005`). Per-task `bt` tail frames at `0xa5a5a5a4` ("corrupt stack?") are FreeRTOS `0xA5` stack fill, not real corruption.
 - Always clean up: `gdb-cli jlink stop --all` and `rm -rf ~/.gdb-cli/{sessions,jlink}` after experiments; verify with `pgrep -af JLinkGDBServer`.

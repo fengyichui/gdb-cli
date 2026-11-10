@@ -116,8 +116,11 @@ gdb-cli jlink -d <device_name> --select usb=<sn> --binary <fw.elf> \
   `threads` lists IDLE/shell/Tmr Svc/No Name with priorities, and
   per-thread `bt` works.
 - `jlink stop` stops the GDB session AND the server. `gdb-cli stop -s
-  <id>` also stops the JLink server when that session was started by
-  `jlink`; for a plain `target` session it only stops GDB.
+  <id>` ALSO stops the JLink server when that session was started by
+  `jlink` — including with `--before-detach` (check the `jlink` array in
+  the stop output; do NOT run `jlink stop --all` afterwards, it will
+  error with "No J-Link instances are running"). For a plain `target`
+  session, `stop` only stops GDB and the server keeps listening.
 - On success the output contains BOTH `jlink_id` and `session_id`. Any
   failure exits non-zero with the reason (e.g. GDBServer log tail for a bad
   device name) and leaves no orphan processes.
@@ -129,6 +132,25 @@ Cortex-M); `eval` does not auto-dereference pointers by default
 `gdb-cli exec -s $SESSION "monitor reset"` with no filtering. To leave
 the target running when stopping, use
 `gdb-cli stop -s $SESSION --before-detach "monitor go"`.
+
+**FreeRTOS manual task traversal (when the RTOS plugin is unavailable or
+the target is halted at boot):** the delayed-list symbols in FreeRTOS
+v10+ are `pxDelayedTaskList` (a `List_t * volatile` that points at
+`xDelayedTaskList1`/`xDelayedTaskList2`) and `pxOverflowDelayedTaskList`
+— there is NO symbol named `xDelayedTaskList`. Other lists:
+`xSuspendedTaskList`, `pxReadyTasksLists[]`. Discover the actual symbols
+in a given firmware with
+`gdb-cli exec -s $SESSION "info variables <regex>"` before writing
+traversal expressions. `gdb-cli ptype -s $SESSION "TCB_t"` returns a
+type summary only; for field offsets use
+`gdb-cli exec -s $SESSION "ptype /o struct tskTaskControlBlock"`.
+Multi-line GDB scripts (e.g. a `while` loop that walks a list with
+`printf`) work in `gdb-cli exec` and the `printf` output IS captured in
+the response `output` field. Expect fake tail frames in per-task
+backtraces: `#N 0x00a5a5a5a4 in ?? ()` / "corrupt stack?" comes from
+`prvTaskExitError` combined with FreeRTOS `0xA5` stack fill — normal,
+ignore frames at addresses like `0xa5a5a5a4` and anything above the
+task entry.
 
 **For a target running on a remote host and port (server ALREADY running —
 e.g. a JLinkGDBServer you started yourself, or one left listening after a
@@ -203,6 +225,7 @@ Use additional commands based on findings:
 # Examine variables
 gdb-cli eval -s $SESSION "variable_name"
 gdb-cli eval -s $SESSION "ptr->field"
+# Type summary; for field offsets use exec "ptype /o struct <tag>" instead
 gdb-cli ptype -s $SESSION "struct_name"
 
 # Memory inspection
@@ -368,10 +391,11 @@ gdb-cli stop -s $SESSION
 
 # Stop session and leave the target running (embedded)
 gdb-cli stop -s $SESSION --before-detach "monitor go"
+# (also stops the bound JLink server; the stop output lists it under "jlink")
 
-# J-Link lifecycle (see Step 1): stop session AND server, or restart both
-gdb-cli jlink stop --all
+# J-Link lifecycle: restart both, or stop servers started outside gdb-cli
 gdb-cli jlink restart
+gdb-cli jlink stop --all   # only needed if you did NOT already `stop` the session
 ```
 
 ## Tips
