@@ -228,6 +228,10 @@ RU_CATALOG = {
     "cli.jlink.interface_help": "Отладочный интерфейс (SWD/JTAG)",
     "cli.jlink.port_help": "Порт GDB Server (по умолчанию: свободный порт)",
     "cli.jlink.timeout_help": "Таймаут пульса GDB в секундах (по умолчанию: 600)",
+    "cli.jlink.init_cmd_help": (
+        "Команда GDB, выполняемая один раз после готовности сессии "
+        "(можно повторять, напр. 'monitor exec EnableLowPowerHandlingMode')"
+    ),
     "cli.jlink.extra_arg_help": "Дополнительный необработанный аргумент JLinkGDBServer (можно повторять)",
     "cli.jlink.jlink_id_help": "ID экземпляра J-Link",
     "cli.jlink.all_help": "Применить ко всем экземплярам",

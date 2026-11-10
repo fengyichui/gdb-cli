@@ -810,6 +810,10 @@ def _jlink_start_options(func):
     )(func)
     func = click.option("--timeout", default=600, help=t("cli.jlink.timeout_help"))(func)
     func = click.option(
+        "--init-cmd", "init_cmds", multiple=True,
+        help=t("cli.jlink.init_cmd_help")
+    )(func)
+    func = click.option(
         "--port", type=_PORT_TYPE, default=None,
         help=t("cli.jlink.port_help"),
     )(func)
@@ -845,6 +849,7 @@ _JLINK_START_OPTION_NAMES = (
     "interface",
     "port",
     "timeout",
+    "init_cmds",
     "extra_args",
 )
 
@@ -1004,11 +1009,14 @@ def _connect_gdb_session(
     gdb_path: str,
     timeout: int,
     session_id: Optional[str] = None,
+    init_cmds: Optional[list] = None,
 ) -> str:
     """Create a GDB session for ``instance`` and wait until it is ready.
 
     ``session_id`` reuses a previous session id (jlink restart keeps the
     session id stable so callers' references survive a restart).
+    ``init_cmds`` are GDB commands executed right after the session is
+    ready (e.g. J-Link ``monitor exec`` device configuration).
     """
     gdb_process = launch_target(
         remote=f"127.0.0.1:{instance.port}",
@@ -1024,11 +1032,35 @@ def _connect_gdb_session(
         "binary": binary,
         "gdb_path": gdb_path,
         "timeout": timeout,
+        "init_cmds": list(init_cmds or []),
     }
 
     _wait_session_ready(session.sock_path)
+    init_errors = _run_init_cmds(session, instance.session_config["init_cmds"])
+    if init_errors:
+        instance.init_errors = init_errors
     _save_instance(instance)
     return session.session_id
+
+
+def _run_init_cmds(session, init_cmds: list) -> list:
+    """Execute ``init_cmds`` over the fresh session; return failures.
+
+    Failures are collected (not raised) so a partially applicable init
+    command never tears down an otherwise working session; the caller
+    decides whether to surface them.
+    """
+    errors = []
+    for command in init_cmds or []:
+        try:
+            with GDBClient(str(session.sock_path)) as client:
+                result = client.call("exec", command=command)
+        except GDBClientError as exc:
+            errors.append(f"{command}: {exc}")
+            continue
+        if isinstance(result, dict) and result.get("error"):
+            errors.append(f"{command}: {result['error']}")
+    return errors
 
 
 def _cleanup_failed_instance(instance) -> list:
@@ -1088,6 +1120,7 @@ def jlink(
     interface: str,
     port: Optional[int],
     timeout: int,
+    init_cmds,
     extra_args,
 ) -> None:
     """Manage JLinkGDBServer and automatically start a GDB session"""
@@ -1112,6 +1145,7 @@ def jlink(
         interface=interface,
         port=port,
         timeout=timeout,
+        init_cmds=init_cmds,
         extra_args=extra_args,
     )
 
@@ -1129,6 +1163,7 @@ def jlink_start(
     interface: str,
     port: Optional[int],
     timeout: int,
+    init_cmds,
     extra_args,
 ) -> None:
     """Start JLinkGDBServer and connect GDB"""
@@ -1145,6 +1180,7 @@ def jlink_start(
         interface = merged.get("interface", interface)
         port = merged.get("port", port)
         timeout = merged.get("timeout", timeout)
+        init_cmds = merged.get("init_cmds", init_cmds)
         extra_args = merged.get("extra_args", extra_args)
 
     try:
@@ -1187,6 +1223,7 @@ def jlink_start(
             binary=binary,
             gdb_path=gdb_path,
             timeout=timeout,
+            init_cmds=list(init_cmds or ()),
         )
     except BaseException as exc:
         # Roll the whole transaction back; cleanup errors must not replace the
@@ -1209,6 +1246,9 @@ def jlink_start(
         "session_id": session_id,
         "status": "started",
     }
+    init_errors = getattr(instance, "init_errors", None)
+    if init_errors:
+        payload["init_errors"] = init_errors
     if duplicate_probes:
         first = duplicate_probes[0]
         payload["warning"] = t(
@@ -1329,6 +1369,7 @@ def jlink_restart(jlink_id: Optional[str]) -> None:
             gdb_path=config.get("gdb_path") or "gdb",
             timeout=config.get("timeout", 600),
             session_id=previous_session_id or None,
+            init_cmds=config.get("init_cmds") or [],
         )
     except BaseException as exc:
         cleanup_errors = _cleanup_failed_instance(restarted)
@@ -1351,6 +1392,9 @@ def jlink_restart(jlink_id: Optional[str]) -> None:
     }
     if session_cleanup_errors:
         payload["session_cleanup_errors"] = session_cleanup_errors
+    init_errors = getattr(restarted, "init_errors", None)
+    if init_errors:
+        payload["init_errors"] = init_errors
     print_json(payload)
 
 

@@ -221,6 +221,10 @@ ZH_CN_CATALOG = {
     "cli.jlink.interface_help": "调试接口（SWD/JTAG）",
     "cli.jlink.port_help": "GDB Server 端口（默认自动选择空闲端口）",
     "cli.jlink.timeout_help": "GDB 心跳超时秒数（默认 600）",
+    "cli.jlink.init_cmd_help": (
+        "会话就绪后自动执行一次的 GDB 命令（可重复，"
+        "如 'monitor exec EnableLowPowerHandlingMode'）"
+    ),
     "cli.jlink.extra_arg_help": "额外透传的 JLinkGDBServer 原始参数（可重复）",
     "cli.jlink.jlink_id_help": "J-Link 实例 ID",
     "cli.jlink.all_help": "对所有实例生效",

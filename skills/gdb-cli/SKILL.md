@@ -81,7 +81,9 @@ gdb-cli jlink stop --all                              # stop GDB session + serve
 # RTOS thread awareness (FreeRTOS etc.): use the standard --rtos option
 gdb-cli jlink -d <device_name> --select usb=<sn> --binary <fw.elf> \
     --gdb-path /usr/bin/gdb-multiarch \
-    --rtos FreeRTOS
+    --rtos FreeRTOS \
+    --init-cmd "monitor exec EnableLowPowerHandlingMode" \
+    --init-cmd "monitor exec SetAllowFlashCache = 0"
 ```
 
 **Critical rules for `--select`:**
@@ -126,6 +128,12 @@ gdb-cli jlink -d <device_name> --select usb=<sn> --binary <fw.elf> \
   device name) and leaves no orphan processes. ALWAYS pass `--jlink-id` to
   `jlink restart`/`jlink stop`: it is only optional when exactly one
   instance is running, and errors out (ambiguity) with two or more.
+- `--init-cmd "<gdb command>"` (repeatable) runs once after the session
+  becomes ready, e.g. J-Link device configuration such as
+  `--init-cmd "monitor exec EnableLowPowerHandlingMode"`. Init commands
+  are persisted with the instance and replayed automatically by
+  `jlink restart`; failures are collected into `init_errors` in the
+  start/restart output instead of failing the session.
 
 Embedded notes: registers are architecture-aware (`pc/sp/lr/xpsr` on
 Cortex-M); `eval` does not auto-dereference pointers by default

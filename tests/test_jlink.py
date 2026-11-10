@@ -630,6 +630,7 @@ class TestJLinkCLI(unittest.TestCase):
             "interface": "SWD",
             "port": 2331,
             "timeout": 600,
+            "init_cmds": (),
             "extra_args": (),
         }
         values.update(overrides)
@@ -660,6 +661,34 @@ class TestJLinkCLI(unittest.TestCase):
         assert payload["status"] == "started"
         assert payload["jlink_id"] == "abcd1234"
         assert payload["session_id"] == "sess1234"
+
+    def test_init_cmds_are_executed_after_connect(self):
+        ctx = _FakeContext(invoked_subcommand=None)
+        _FakeClick._context = ctx
+        fake_process = types.SimpleNamespace(
+            session=types.SimpleNamespace(
+                session_id="sess1234", sock_path="/tmp/fake.sock"
+            )
+        )
+
+        with patch.object(self.cli, "start_gdbserver",
+                          return_value=self._instance()), \
+             patch.object(self.cli, "launch_target", return_value=fake_process), \
+             patch.object(self.cli, "_wait_session_ready",
+                          return_value={"state": "ready"}), \
+             patch.object(self.cli, "_run_init_cmds", return_value=[]) as mock_init, \
+             patch.object(self.cli, "_save_instance"), \
+             patch.object(self.cli, "print_json"):
+            self._call_jlink(
+                init_cmds=("monitor exec EnableLowPowerHandlingMode",
+                           "monitor exec SetAllowFlashCache = 0"),
+            )
+
+        mock_init.assert_called_once()
+        assert mock_init.call_args.args[1] == [
+            "monitor exec EnableLowPowerHandlingMode",
+            "monitor exec SetAllowFlashCache = 0",
+        ]
 
     def test_rtos_option_injects_plugin_path(self):
         ctx = _FakeContext(invoked_subcommand=None)
@@ -818,6 +847,7 @@ def _start_kwargs(**overrides):
         "interface": "SWD",
         "port": 2331,
         "timeout": 600,
+        "init_cmds": (),
         "extra_args": (),
     }
     values.update(overrides)
@@ -1046,6 +1076,7 @@ def test_restart_reconnects_with_persisted_config(cli_module, jlink_dir):
             "binary": "fw.elf",
             "gdb_path": "arm-gdb",
             "timeout": 120,
+            "init_cmds": ["monitor exec EnableLowPowerHandlingMode"],
         },
     )
     restarted = _make_instance(jlink_dir, instance_id="newinst1")
@@ -1069,6 +1100,8 @@ def test_restart_reconnects_with_persisted_config(cli_module, jlink_dir):
     mock_session_stop.assert_called_once_with("oldsess")
     # The session id must be stable across a restart.
     assert captured["session_id"] == "oldsess"
+    # Init commands are replayed from the persisted session config.
+    assert captured["init_cmds"] == ["monitor exec EnableLowPowerHandlingMode"]
     payload = mock_print.call_args.args[0]
     assert payload["session_id"] == "oldsess"
     assert payload["status"] == "restarted"

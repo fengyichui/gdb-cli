@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.5.0] - 2026-11-10
 
 ### Added
+- `jlink --init-cmd "<gdb command>"` (repeatable): executed automatically
+  once the session is ready (e.g. J-Link `monitor exec` device
+  configuration). Persisted with the instance and replayed by
+  `jlink restart`; failures surface as `init_errors` in the output.
 - `jlink restart` now keeps the same session_id across a restart, so
   callers' `$SESSION` references survive.
 - `gdb-cli stop -s <session>` now also stops the JLinkGDBServer bound to

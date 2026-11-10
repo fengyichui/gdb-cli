@@ -226,6 +226,10 @@ ENGLISH_CATALOG = {
     "cli.jlink.interface_help": "Debug interface (SWD/JTAG)",
     "cli.jlink.port_help": "GDB server port (default: auto-selected free port)",
     "cli.jlink.timeout_help": "GDB heartbeat timeout in seconds (default: 600)",
+    "cli.jlink.init_cmd_help": (
+        "GDB command to run once after the session is ready (repeatable, "
+        "e.g. 'monitor exec EnableLowPowerHandlingMode')"
+    ),
     "cli.jlink.extra_arg_help": "Extra raw JLinkGDBServer argument (repeatable)",
     "cli.jlink.jlink_id_help": "J-Link instance ID",
     "cli.jlink.all_help": "Apply to all instances",
