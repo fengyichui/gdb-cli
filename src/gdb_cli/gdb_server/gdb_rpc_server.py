@@ -520,9 +520,6 @@ class GDBRPCServer:
         # 注入 session 元数据
         params["_session_meta"] = self.session_meta
 
-        # 强制使用 session 配置的安全级别，忽略客户端传入的值
-
-
         # 注入 server 状态，供 handle_status 报告 loading/error/ready
         params["_server_state"] = self._state
 

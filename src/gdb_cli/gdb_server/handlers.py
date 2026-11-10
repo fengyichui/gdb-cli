@@ -47,6 +47,7 @@ format_value_for_display = _value_formatter.format_value_for_display
 DEFAULT_MAX_DEPTH = _value_formatter.DEFAULT_MAX_DEPTH
 DEFAULT_MAX_ELEMENTS = _value_formatter.DEFAULT_MAX_ELEMENTS
 
+
 def handle_eval(
     expr: str,
     max_depth: int = DEFAULT_MAX_DEPTH,
