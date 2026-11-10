@@ -75,7 +75,7 @@ gdb-cli jlink -d <device_name> --select ip=<host>:<port> \
 
 # Lifecycle
 gdb-cli jlink status                                  # list managed servers (+ session binding)
-gdb-cli jlink restart                                 # restart server + reconnect (session_id stays the same)
+gdb-cli jlink restart --jlink-id <id>                 # restart server + reconnect (session_id stays the same)
 gdb-cli jlink stop --all                              # stop GDB session + server, clean up
 
 # RTOS thread awareness (FreeRTOS etc.): use the standard --rtos option
@@ -123,7 +123,9 @@ gdb-cli jlink -d <device_name> --select usb=<sn> --binary <fw.elf> \
   session, `stop` only stops GDB and the server keeps listening.
 - On success the output contains BOTH `jlink_id` and `session_id`. Any
   failure exits non-zero with the reason (e.g. GDBServer log tail for a bad
-  device name) and leaves no orphan processes.
+  device name) and leaves no orphan processes. ALWAYS pass `--jlink-id` to
+  `jlink restart`/`jlink stop`: it is only optional when exactly one
+  instance is running, and errors out (ambiguity) with two or more.
 
 Embedded notes: registers are architecture-aware (`pc/sp/lr/xpsr` on
 Cortex-M); `eval` does not auto-dereference pointers by default
@@ -137,6 +139,11 @@ type argument: `monitor reset 0` = NORMAL (core+peripherals via
 SYSRESETREQ/VECTRESET, default), `monitor reset 1` = CORE only
 (peripherals keep state), `monitor reset 2` = RESET pin (core+
 peripherals via the reset pin).
+CAUTION: `monitor reset 2` (RESET pin) drops the debug connection on
+some boards — JLinkGDBServer dies or the GDB session breaks. If commands
+start failing afterwards, recover with
+`gdb-cli jlink restart --jlink-id <id>` (same session_id, symbols
+reloaded from the persisted --binary).
 JLinkGDBServer halts the CPU on connect and RESUMES it automatically on
 disconnect — no `monitor go` is needed before stopping.
 `gdb-cli stop --before-detach "<commands>"` remains available as a
@@ -415,7 +422,7 @@ gdb-cli stop -s $SESSION
 gdb-cli stop -s $SESSION --before-detach "<commands>"
 
 # J-Link lifecycle: restart both (session_id stays the same), or stop servers started outside gdb-cli
-gdb-cli jlink restart
+gdb-cli jlink restart --jlink-id $JLINK_ID
 gdb-cli jlink stop --all   # only needed if you did NOT already `stop` the session
 ```
 
