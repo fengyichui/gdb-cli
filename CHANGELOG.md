@@ -7,16 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
-- Sessions started without `--safe` now use `safety_level=off`: no command
-  filtering at all. `source`, `python`, `shell`, multi-line input and
-  lifecycle commands are accepted; this deliberately reintroduces arbitrary
-  host-code execution for default sessions.
-- `--safe` remains the only way to enable the filter. `--safe` starts at
-  readonly; `--allow-write`/`--allow-call` relax target operations to
-  readwrite/full, while host-code commands and multi-line input stay blocked.
+### Added
 - `jlink --rtos` lists the supported RTOS plugins in all locales without
   exposing the internal plugin path.
+
+### Removed
+- Removed the command safety filter and all related policy: `--safe`,
+  `--allow-write`, `--allow-call`, `safety_level` session metadata and
+  `safety.py`. `exec` and `thread-apply` now run any GDB command without a
+  whitelist, including `source`, `python`, `shell` and multi-line input.
 
 ### Fixed
 - `ptype` accepts type names (`TCB_t`, `struct tskTaskControlBlock`) by

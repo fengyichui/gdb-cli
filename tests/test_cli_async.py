@@ -231,7 +231,6 @@ class TestCLIAsyncBehavior(unittest.TestCase):
             remote="[::1]:2331",
             binary=None,
             sock_path="/tmp/x.sock",
-            safety_level="readonly",
         )
 
         with patch.object(self.cli, "find_session_by_remote", return_value=None), \
@@ -244,9 +243,6 @@ class TestCLIAsyncBehavior(unittest.TestCase):
                 scheduler_locking=False,
                 non_stop=False,
                 timeout=600,
-                allow_write=False,
-                allow_call=False,
-                safety=False,
                 gdb_path="gdb",
             )
 
@@ -264,9 +260,6 @@ class TestCLIAsyncBehavior(unittest.TestCase):
                     scheduler_locking=False,
                     non_stop=False,
                     timeout=600,
-                    allow_write=False,
-                    allow_call=False,
-                    safety=False,
                     gdb_path="gdb",
                 )
 

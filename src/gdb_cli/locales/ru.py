@@ -87,20 +87,12 @@ RU_CATALOG = {
     "cli.attach.scheduler_locking_help": "Включить scheduler-locking",
     "cli.attach.non_stop_help": "Включить режим non-stop",
     "cli.attach.timeout_help": "Таймаут пульса в секундах (по умолчанию: 600)",
-    "cli.attach.allow_write_help": "Разрешить изменение памяти",
-    "cli.attach.allow_call_help": "Разрешить вызовы функций",
-
-    # === target command ===
     "cli.target.remote_help": "Адрес удалённой цели (host:port или [ipv6]:port)",
     "cli.target.binary_help": "Путь к исполняемому файлу (опционально)",
     "cli.target.remote_mode_help": "Режим удалённого подключения (remote/extended-remote)",
     "cli.target.scheduler_locking_help": "Включить scheduler-locking",
     "cli.target.non_stop_help": "Включить режим non-stop",
     "cli.target.timeout_help": "Таймаут пульса в секундах (по умолчанию: 600)",
-    "cli.target.allow_write_help": "Разрешить изменение памяти",
-    "cli.target.allow_call_help": "Разрешить вызовы функций",
-
-    # === eval-cmd command ===
     "cli.eval_cmd.doc": "Вычислить выражение C/C++",
     "cli.eval_cmd.session_help": "ID сессии",
     "cli.eval_cmd.max_depth_help": "Лимит глубины рекурсии",
@@ -135,9 +127,6 @@ RU_CATALOG = {
     # === exec command ===
     "cli.exec.doc": "Выполнить сырую команду GDB",
     "cli.exec.session_help": "ID сессии",
-    "cli.exec.safety_level_help": "Уровень безопасности (off/readonly/readwrite/full)",
-
-    # === stop command ===
     "cli.stop.doc": "Остановить сессию и безопасно выйти из GDB",
     "cli.stop.session_help": "ID сессии",
     "cli.stop.before_detach_help": (
@@ -225,13 +214,6 @@ RU_CATALOG = {
     "cli.jlink.restart.doc": "Перезапустить экземпляр JLinkGDBServer (использует сохранённые настройки сессии GDB)",
     "cli.jlink.status.doc": "Показать состояние экземпляров JLinkGDBServer",
     "cli.jlink.devices.doc": "Список подключённых отладчиков J-Link",
-    "cli.safe_help": (
-        "Включить фильтр безопасности (по умолчанию off — команды не "
-        "проверяются). С --safe сессия начинает в readonly и дополнительно "
-        "блокирует выполнение кода на хосте (source/python/shell) и "
-        "многострочный ввод; --allow-write/--allow-call расширяют "
-        "операции с целью."
-    ),
     "cli.jlink.device_help": "Имя целевого устройства (например, nRF54L15_M33)",
     "cli.jlink.select_help": "Выбор отладчика: usb=<серийный номер|никнейм> или ip=HOST:PORT",
     "cli.jlink.binary_help": "Путь к исполняемому файлу для сессии GDB (опционально)",
@@ -244,8 +226,6 @@ RU_CATALOG = {
     ),
     "cli.jlink.interface_help": "Отладочный интерфейс (SWD/JTAG)",
     "cli.jlink.port_help": "Порт GDB Server (по умолчанию: свободный порт)",
-    "cli.jlink.allow_write_help": "Разрешить изменение памяти",
-    "cli.jlink.allow_call_help": "Разрешить вызовы функций",
     "cli.jlink.timeout_help": "Таймаут пульса GDB в секундах (по умолчанию: 600)",
     "cli.jlink.extra_arg_help": "Дополнительный необработанный аргумент JLinkGDBServer (можно повторять)",
     "cli.jlink.jlink_id_help": "ID экземпляра J-Link",
@@ -300,7 +280,6 @@ RU_CATALOG = {
     "errors.no_debug_info.suggestion": "Попробуйте загрузить debuginfo: 'dnf debuginfo-install' или проверьте файл .debug",
     "errors.process_not_found.suggestion": "Проверьте существование процесса: 'ps aux | grep <имя_процесса>'",
     "errors.ptrace_denied.suggestion": "Выполните: 'echo 0 | sudo tee /proc/sys/kernel/yama/ptrace_scope'",
-    "errors.command_blocked.suggestion": "Команда заблокирована политикой безопасности, используйте флаг --allow-write или --allow-call",
     "errors.command_timeout.suggestion": "Таймаут команды, попробуйте увеличить --timeout или упростить операцию",
     "errors.load_timeout.suggestion": "Таймаут загрузки core файла, файл может быть слишком большим, попробуйте увеличить таймаут",
     "errors.socket_not_found.suggestion": "Сессия GDB могла завершиться, перезапустите 'gdb-cli load' или 'gdb-cli attach'",

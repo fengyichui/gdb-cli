@@ -19,7 +19,7 @@ os.environ["GDB_CLI_SERVER_DIR"] = _server_dir
 
 
 class TestHandleExec(unittest.TestCase):
-    """Test raw command execution handler with safety filtering."""
+    """Test raw command execution handler."""
 
     def setUp(self):
         import importlib
@@ -28,97 +28,37 @@ class TestHandleExec(unittest.TestCase):
         importlib.reload(handlers_mod)
         self.handlers = handlers_mod
 
-    def test_exec_allowed_read_command(self):
-        """exec of a read command should be allowed."""
-        # Make gdb.post_event call the function directly
+    def test_exec_runs_command(self):
         sys.modules['gdb'].post_event = lambda fn: fn()
         sys.modules['gdb'].execute = Mock(return_value="#0 main at foo.c:10")
 
-        result = self.handlers.handle_exec("bt", safety_level="readonly")
-        self.assertIn("command", result)
+        result = self.handlers.handle_exec("bt")
         self.assertEqual(result["command"], "bt")
+        self.assertIn("main", result["output"])
 
-    def test_exec_shell_blocked(self):
-        """exec of 'shell' must be blocked."""
-        result = self.handlers.handle_exec("shell ls", safety_level="readonly")
-        self.assertIn("error", result)
-
-    def test_exec_python_blocked(self):
-        """exec of 'python' must be blocked (Issue #1 fix)."""
-        result = self.handlers.handle_exec("python import os; os.system('id')", safety_level="readonly")
-        self.assertIn("error", result)
-
-    def test_exec_python_interactive_blocked(self):
-        """exec of 'python-interactive' must be blocked."""
-        result = self.handlers.handle_exec("python-interactive", safety_level="readonly")
-        self.assertIn("error", result)
-
-    def test_exec_quit_blocked(self):
-        """exec of 'quit' must be blocked."""
-        result = self.handlers.handle_exec("quit", safety_level="readonly")
-        self.assertIn("error", result)
-
-    def test_exec_kill_blocked(self):
-        """exec of 'kill' must be blocked."""
-        result = self.handlers.handle_exec("kill", safety_level="readonly")
-        self.assertIn("error", result)
-
-    def test_exec_signal_blocked(self):
-        """exec of 'signal' must be blocked."""
-        result = self.handlers.handle_exec("signal 9", safety_level="readonly")
-        self.assertIn("error", result)
-
-    def test_exec_set_blocked_in_readonly(self):
-        """exec of 'set' must be blocked in readonly mode."""
-        result = self.handlers.handle_exec("set variable x=42", safety_level="readonly")
-        self.assertIn("error", result)
-
-    def test_exec_set_allowed_in_full(self):
-        """exec of 'set' must be allowed in full mode."""
-        # Make gdb.post_event call the function directly
-        sys.modules['gdb'].post_event = lambda fn: fn()
-        sys.modules['gdb'].execute = Mock(return_value="")
-
-        result = self.handlers.handle_exec("set variable x=42", safety_level="full")
-        self.assertNotIn("error", result)
-
-    def test_exec_attach_blocked(self):
-        """exec of 'attach' must be blocked."""
-        result = self.handlers.handle_exec("attach 12345", safety_level="full")
-        self.assertIn("error", result)
-
-    def test_exec_detach_blocked(self):
-        """exec of 'detach' must be blocked."""
-        result = self.handlers.handle_exec("detach", safety_level="full")
-        self.assertIn("error", result)
-
-    def test_exec_target_blocked(self):
-        """exec of 'target' must be blocked."""
-        result = self.handlers.handle_exec("target extended-remote :3333", safety_level="full")
-        self.assertIn("error", result)
-
-    def test_exec_everything_allowed_in_off(self):
-        """off disables the filter entirely (default sessions)."""
+    def test_exec_accepts_unrestricted_commands(self):
         sys.modules['gdb'].post_event = lambda fn: fn()
         sys.modules['gdb'].execute = Mock(return_value="")
 
         for command in (
             "source /tmp/x.gdb",
             "python import os",
-            "python-interactive",
             "shell ls",
             "quit",
-            "kill",
             "attach 12345",
-            "detach",
             "target extended-remote :3333",
             "bt\npython print(1)",
         ):
             with self.subTest(command=command):
-                result = self.handlers.handle_exec(
-                    command, safety_level="off"
-                )
+                result = self.handlers.handle_exec(command)
                 self.assertNotIn("error", result)
+
+    def test_exec_surfaces_gdb_error(self):
+        sys.modules['gdb'].execute = Mock(
+            side_effect=sys.modules['gdb'].error("boom")
+        )
+        result = self.handlers.handle_exec("bogus")
+        self.assertIn("error", result)
 
 
 class TestHandlePtype(unittest.TestCase):
@@ -165,7 +105,7 @@ class TestHandlePtype(unittest.TestCase):
 
 
 class TestHandleThreadApply(unittest.TestCase):
-    """Test thread_apply handler with safety filtering."""
+    """Test thread_apply handler."""
 
     def setUp(self):
         import importlib
@@ -174,57 +114,7 @@ class TestHandleThreadApply(unittest.TestCase):
         importlib.reload(handlers_mod)
         self.handlers = handlers_mod
 
-    def test_thread_apply_shell_blocked(self):
-        """thread-apply with 'shell' must be blocked (Issue #2 fix)."""
-        # Mock inferior threads
-        mock_thread = Mock()
-        mock_thread.num = 1
-        mock_inferior = Mock()
-        mock_inferior.threads.return_value = [mock_thread]
-        sys.modules['gdb'].selected_inferior = Mock(return_value=mock_inferior)
-        sys.modules['gdb'].selected_thread = Mock(return_value=mock_thread)
-
-        result = self.handlers.handle_thread_apply(
-            command="shell ls",
-            all_threads=True,
-            safety_level="readonly",
-        )
-        self.assertIn("error", result)
-
-    def test_thread_apply_python_blocked(self):
-        """thread-apply with 'python' must be blocked (Issue #2 fix)."""
-        mock_thread = Mock()
-        mock_thread.num = 1
-        mock_inferior = Mock()
-        mock_inferior.threads.return_value = [mock_thread]
-        sys.modules['gdb'].selected_inferior = Mock(return_value=mock_inferior)
-        sys.modules['gdb'].selected_thread = Mock(return_value=mock_thread)
-
-        result = self.handlers.handle_thread_apply(
-            command="python import os",
-            all_threads=True,
-            safety_level="readonly",
-        )
-        self.assertIn("error", result)
-
-    def test_thread_apply_quit_blocked(self):
-        """thread-apply with 'quit' must be blocked."""
-        mock_thread = Mock()
-        mock_thread.num = 1
-        mock_inferior = Mock()
-        mock_inferior.threads.return_value = [mock_thread]
-        sys.modules['gdb'].selected_inferior = Mock(return_value=mock_inferior)
-        sys.modules['gdb'].selected_thread = Mock(return_value=mock_thread)
-
-        result = self.handlers.handle_thread_apply(
-            command="quit",
-            all_threads=True,
-            safety_level="readonly",
-        )
-        self.assertIn("error", result)
-
-    def test_thread_apply_allowed_read_command(self):
-        """thread-apply with 'bt' should be allowed."""
+    def test_thread_apply_runs_command(self):
         mock_thread = Mock()
         mock_thread.num = 1
         mock_inferior = Mock()
@@ -236,7 +126,6 @@ class TestHandleThreadApply(unittest.TestCase):
         result = self.handlers.handle_thread_apply(
             command="bt",
             all_threads=True,
-            safety_level="readonly",
         )
         self.assertNotIn("error", result)
         self.assertIn("results", result)
@@ -320,7 +209,7 @@ class TestHandleExecThreading(unittest.TestCase):
     def test_exec_does_not_post_nested_event(self):
         self.gdb.post_event = Mock()
 
-        result = self.handlers.handle_exec("info registers", safety_level="readonly")
+        result = self.handlers.handle_exec("info registers")
 
         self.gdb.post_event.assert_not_called()
         self.assertEqual(result["output"], "ok")
@@ -659,32 +548,6 @@ class TestDisasm(unittest.TestCase):
         self.assertIn("instructions", result)
         self.assertEqual(result["function"], "??")
         self.assertEqual(result["count"], 2)
-
-
-class TestSafetyFailClosed(unittest.TestCase):
-    """Handlers must refuse commands when the safety module is unavailable."""
-
-    def setUp(self):
-        import importlib
-
-        import gdb_cli.gdb_server.handlers as handlers_mod
-        importlib.reload(handlers_mod)
-        self.handlers = handlers_mod
-        self.handlers.SAFETY_AVAILABLE = False
-
-    def test_exec_fails_closed(self):
-        sys.modules["gdb"].execute = Mock(return_value="ran")
-        result = self.handlers.handle_exec("bt")
-        self.assertIn("error", result)
-        self.assertIn("safety module unavailable", result["error"])
-        sys.modules["gdb"].execute.assert_not_called()
-
-    def test_thread_apply_fails_closed(self):
-        result = self.handlers.handle_thread_apply(
-            command="bt", all_threads=True
-        )
-        self.assertIn("error", result)
-        self.assertIn("safety module unavailable", result["error"])
 
 
 if __name__ == "__main__":

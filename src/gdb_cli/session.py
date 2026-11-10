@@ -15,7 +15,7 @@ import tempfile
 import threading
 import time
 import uuid
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 from typing import List, Optional
 
@@ -45,7 +45,6 @@ class SessionMeta:
     started_at: float = field(default_factory=time.time)
     last_active: float = field(default_factory=time.time)
     heartbeat_timeout: int = 600       # 心跳超时秒数
-    safety_level: str = "readonly"     # "off" | "readonly" | "readwrite" | "full"
 
     def to_dict(self) -> dict:
         """转换为字典"""
@@ -53,8 +52,9 @@ class SessionMeta:
 
     @classmethod
     def from_dict(cls, data: dict) -> 'SessionMeta':
-        """从字典创建"""
-        return cls(**data)
+        """从字典创建，忽略旧版本遗留的未知字段。"""
+        known = {item.name for item in fields(cls)}
+        return cls(**{key: value for key, value in data.items() if key in known})
 
 
 def create_session(
@@ -63,8 +63,7 @@ def create_session(
     core: Optional[str] = None,
     pid: Optional[int] = None,
     remote: Optional[str] = None,
-    timeout: int = 600,
-    safety_level: str = "readonly"
+    timeout: int = 600
 ) -> SessionMeta:
     """
     创建新会话
@@ -76,7 +75,6 @@ def create_session(
         pid: 目标进程 PID
         remote: host:port
         timeout: 心跳超时秒数
-        safety_level: 安全级别
 
     Returns:
         SessionMeta 实例
@@ -99,8 +97,7 @@ def create_session(
         pid=pid,
         remote=remote,
         sock_path=str(sock_path),
-        heartbeat_timeout=timeout,
-        safety_level=safety_level
+        heartbeat_timeout=timeout
     )
 
     with _create_lock:

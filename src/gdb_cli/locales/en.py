@@ -85,20 +85,12 @@ ENGLISH_CATALOG = {
     "cli.attach.scheduler_locking_help": "Enable scheduler-locking",
     "cli.attach.non_stop_help": "Enable non-stop mode",
     "cli.attach.timeout_help": "Heartbeat timeout in seconds (default: 600)",
-    "cli.attach.allow_write_help": "Allow memory modification",
-    "cli.attach.allow_call_help": "Allow function calls",
-
-    # === target command ===
     "cli.target.remote_help": "Remote target address (host:port or [ipv6]:port)",
     "cli.target.binary_help": "Executable file path (optional)",
     "cli.target.remote_mode_help": "Remote connection mode (remote/extended-remote)",
     "cli.target.scheduler_locking_help": "Enable scheduler-locking",
     "cli.target.non_stop_help": "Enable non-stop mode",
     "cli.target.timeout_help": "Heartbeat timeout in seconds (default: 600)",
-    "cli.target.allow_write_help": "Allow memory modification",
-    "cli.target.allow_call_help": "Allow function calls",
-
-    # === eval-cmd command ===
     "cli.eval_cmd.doc": "Evaluate C/C++ expression",
     "cli.eval_cmd.session_help": "Session ID",
     "cli.eval_cmd.max_depth_help": "Recursion depth limit",
@@ -133,9 +125,6 @@ ENGLISH_CATALOG = {
     # === exec command ===
     "cli.exec.doc": "Execute raw GDB command",
     "cli.exec.session_help": "Session ID",
-    "cli.exec.safety_level_help": "Safety level (off/readonly/readwrite/full)",
-
-    # === stop command ===
     "cli.stop.doc": "Stop session and safely exit GDB",
     "cli.stop.session_help": "Session ID",
     "cli.stop.before_detach_help": (
@@ -223,12 +212,6 @@ ENGLISH_CATALOG = {
     "cli.jlink.restart.doc": "Restart a JLinkGDBServer instance (reuses persisted GDB session settings)",
     "cli.jlink.status.doc": "Show JLinkGDBServer instance status",
     "cli.jlink.devices.doc": "List attached J-Link probes",
-    "cli.safe_help": (
-        "Enable the safety filter (default off = no command filtering). "
-        "With --safe, sessions start readonly and also block host-code "
-        "commands (source/python/shell) and multi-line input; "
-        "--allow-write/--allow-call relax target operations."
-    ),
     "cli.jlink.device_help": "Target device name (e.g. nRF54L15_M33)",
     "cli.jlink.select_help": "Probe selector: usb=<serial|nickname> or ip=HOST:PORT",
     "cli.jlink.binary_help": "Executable file path for the GDB session (optional)",
@@ -241,8 +224,6 @@ ENGLISH_CATALOG = {
     ),
     "cli.jlink.interface_help": "Debug interface (SWD/JTAG)",
     "cli.jlink.port_help": "GDB server port (default: auto-selected free port)",
-    "cli.jlink.allow_write_help": "Allow memory modification",
-    "cli.jlink.allow_call_help": "Allow function calls",
     "cli.jlink.timeout_help": "GDB heartbeat timeout in seconds (default: 600)",
     "cli.jlink.extra_arg_help": "Extra raw JLinkGDBServer argument (repeatable)",
     "cli.jlink.jlink_id_help": "J-Link instance ID",
@@ -301,7 +282,6 @@ ENGLISH_CATALOG = {
     "errors.no_debug_info.suggestion": "Try loading debuginfo: 'dnf debuginfo-install' or check .debug file",
     "errors.process_not_found.suggestion": "Check if process exists: 'ps aux | grep <process_name>'",
     "errors.ptrace_denied.suggestion": "Run: 'echo 0 | sudo tee /proc/sys/kernel/yama/ptrace_scope'",
-    "errors.command_blocked.suggestion": "Command blocked by safety policy, use --allow-write or --allow-call flag",
     "errors.command_timeout.suggestion": "Command timed out, try increasing --timeout or simplifying operation",
     "errors.load_timeout.suggestion": "Core file load timed out, file may be too large, try increasing timeout",
     "errors.socket_not_found.suggestion": "GDB session may have terminated, re-run 'gdb-cli load' or 'gdb-cli attach'",

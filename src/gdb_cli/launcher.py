@@ -24,17 +24,6 @@ GDB_SERVER_SCRIPT = Path(__file__).parent / "gdb_server" / "gdb_rpc_server.py"
 # heartbeat is a user-facing policy.
 SOCKET_WAIT_TIMEOUT = 30.0
 
-# GDB's own permission switches, mapped to the three safety levels. These give
-# GDB-level enforcement on top of the RPC handler filtering, so read-only mode
-# cannot be bypassed through raw `print`/`eval` expressions.
-_SAFETY_PERMISSIONS = {
-    "off": ("on", "on", "on"),
-    "readonly": ("off", "off", "off"),
-    "readwrite": ("on", "on", "off"),
-    "full": ("on", "on", "on"),
-}
-
-
 class GDBLauncherError(Exception):
     """启动器错误"""
     pass
@@ -116,8 +105,6 @@ def launch_core(
         "set print elements 0",
         "set confirm off",
     ]
-    # Core dumps are never writable: enforce readonly at the GDB level.
-    gdb_commands.extend(_safety_commands("readonly"))
 
     # sysroot / solib-prefix
     # NOTE: `set` takes the rest of the line literally; single quotes would
@@ -160,10 +147,7 @@ def launch_attach(
     scheduler_locking: bool = True,
     non_stop: bool = True,
     timeout: int = 600,
-    allow_write: bool = False,
-    allow_call: bool = False,
-    gdb_path: str = "gdb",
-    safety: str = "on"
+    gdb_path: str = "gdb"
 ) -> GDBProcess:
     """
     启动 Attach 模式 GDB 进程
@@ -174,8 +158,6 @@ def launch_attach(
         scheduler_locking: 是否启用 scheduler-locking
         non_stop: 是否启用 non-stop 模式
         timeout: 心跳超时秒数
-        allow_write: 是否允许内存修改
-        allow_call: 是否允许函数调用
         gdb_path: GDB 可执行文件路径
 
     Returns:
@@ -186,19 +168,11 @@ def launch_attach(
         raise GDBLauncherError(f"Process {pid} does not exist")
 
     # 创建 session
-    safety_level = "full" if (allow_write or allow_call) else "readonly"
-    if allow_write and not allow_call:
-        safety_level = "readwrite"
-    if safety == "full":
-        # User explicitly opted out of the safety filter: no command checks.
-        safety_level = "off"
-
     session = create_session(
         mode="attach",
         pid=pid,
         binary=binary,
-        timeout=timeout,
-        safety_level=safety_level
+        timeout=timeout
     )
 
     # 构建 GDB 启动命令
@@ -207,7 +181,6 @@ def launch_attach(
         "set print elements 0",
         "set confirm off",
     ]
-    gdb_commands.extend(_safety_commands(session.safety_level))
 
     # non-stop 模式
     if non_stop:
@@ -250,11 +223,8 @@ def launch_target(
     scheduler_locking: bool = False,
     non_stop: bool = False,
     timeout: int = 600,
-    allow_write: bool = False,
-    allow_call: bool = False,
     gdb_path: str = "gdb",
-    remote_mode: str = "extended-remote",
-    safety: str = "on"
+    remote_mode: str = "extended-remote"
 ) -> GDBProcess:
     """
     Args:
@@ -263,8 +233,6 @@ def launch_target(
         scheduler_locking: 是否启用 scheduler-locking (默认关闭，裸机 remote 常不支持)
         non_stop: 是否启用 non-stop 模式
         timeout: 心跳超时秒数
-        allow_write: 是否允许内存修改
-        allow_call: 是否允许函数调用
         gdb_path: GDB 可执行文件路径
         remote_mode: "remote" | "extended-remote"
 
@@ -276,19 +244,11 @@ def launch_target(
         remote_mode = "extended-remote"
 
     # 创建 session
-    safety_level = "full" if (allow_write or allow_call) else "readonly"
-    if allow_write and not allow_call:
-        safety_level = "readwrite"
-    if safety == "full":
-        # User explicitly opted out of the safety filter: no command checks.
-        safety_level = "off"
-
     session = create_session(
         mode="target",
         remote=remote,
         binary=binary,
-        timeout=timeout,
-        safety_level=safety_level
+        timeout=timeout
     )
 
     # 构建 GDB 启动命令
@@ -297,7 +257,6 @@ def launch_target(
         "set print elements 0",
         "set confirm off",
     ]
-    gdb_commands.extend(_safety_commands(session.safety_level))
 
     # non-stop 模式
     if non_stop:
@@ -335,21 +294,6 @@ def launch_target(
     return gdb_process
 
 
-def _safety_commands(safety_level: str) -> List[str]:
-    """Return the GDB permission commands for a safety level.
-
-    Unknown levels fall back to the strictest (readonly) set.
-    """
-    memory, registers, functions = _SAFETY_PERMISSIONS.get(
-        safety_level, _SAFETY_PERMISSIONS["readonly"]
-    )
-    return [
-        f"set may-write-memory {memory}",
-        f"set may-write-registers {registers}",
-        f"set may-call-functions {functions}",
-    ]
-
-
 def _build_server_commands(session: SessionMeta) -> List[str]:
     """构建 RPC Server 启动命令"""
     session_meta = {
@@ -361,7 +305,6 @@ def _build_server_commands(session: SessionMeta) -> List[str]:
         "remote": session.remote,
         "sock_path": str(session.sock_path),
         "started_at": session.started_at,
-        "safety_level": session.safety_level,
     }
 
     # 序列化 session 元数据

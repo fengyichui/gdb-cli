@@ -521,7 +521,7 @@ class GDBRPCServer:
         params["_session_meta"] = self.session_meta
 
         # 强制使用 session 配置的安全级别，忽略客户端传入的值
-        params["safety_level"] = self.session_meta.get("safety_level", "readonly")
+
 
         # 注入 server 状态，供 handle_status 报告 loading/error/ready
         params["_server_state"] = self._state

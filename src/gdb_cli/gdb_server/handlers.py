@@ -47,26 +47,6 @@ format_value_for_display = _value_formatter.format_value_for_display
 DEFAULT_MAX_DEPTH = _value_formatter.DEFAULT_MAX_DEPTH
 DEFAULT_MAX_ELEMENTS = _value_formatter.DEFAULT_MAX_ELEMENTS
 
-# 动态加载 safety（避免相对导入问题）
-_safety_path = Path(_server_dir).parent / "safety.py"
-if _safety_path.exists():
-    _safety_spec = importlib.util.spec_from_file_location("safety", _safety_path)
-    if _safety_spec is None or _safety_spec.loader is None:
-        SAFETY_AVAILABLE = False
-    else:
-        _safety = importlib.util.module_from_spec(_safety_spec)
-        try:
-            _safety_spec.loader.exec_module(_safety)
-            SafetyFilter = _safety.SafetyFilter
-            SafetyLevel = _safety.SafetyLevel
-            check_wrapped_command = _safety.check_wrapped_command
-            SAFETY_AVAILABLE = True
-        except Exception:
-            SAFETY_AVAILABLE = False
-else:
-    SAFETY_AVAILABLE = False
-
-
 def handle_eval(
     expr: str,
     max_depth: int = DEFAULT_MAX_DEPTH,
@@ -613,38 +593,19 @@ def handle_locals_internal(frame: 'gdb.Frame') -> List[dict]:
 
 def handle_exec(
     command: str,
-    safety_level: str = "readonly",
     **kwargs
 ) -> dict:
     """
-    执行原始 GDB 命令（经过安全过滤）
+    执行原始 GDB 命令
 
     Args:
         command: GDB 命令
-        safety_level: 安全级别 ("off", "readonly", "readwrite", "full")
 
     Returns:
         {"output": "...", "command": "..."}
     """
     if not GDB_AVAILABLE:
         return {"error": "GDB not available"}
-
-    # Fail closed: never execute raw commands without the safety module.
-    if not SAFETY_AVAILABLE:
-        return {
-            "error": "safety module unavailable; command refused",
-            "command": command,
-        }
-
-    # 使用 SafetyFilter 进行安全检查
-    try:
-        level = SafetyLevel(safety_level)
-    except ValueError:
-        level = SafetyLevel.READONLY
-    sf = SafetyFilter(level)
-    allowed, reason = sf.filter_command(command)
-    if not allowed:
-        return {"error": reason or "Command not allowed", "command": command}
 
     try:
         # Handlers are already dispatched on the GDB main thread by
@@ -831,13 +792,6 @@ def handle_thread_apply(
     if not GDB_AVAILABLE:
         return {"error": "GDB not available"}
 
-    # Fail closed: never execute raw commands without the safety module.
-    if not SAFETY_AVAILABLE:
-        return {
-            "error": "safety module unavailable; command refused",
-            "command": command,
-        }
-
     try:
         inferior = gdb.selected_inferior()
         all_threads_list = list(inferior.threads())
@@ -851,26 +805,6 @@ def handle_thread_apply(
             target_threads = [t for t in all_threads_list if t.num in ids]
         else:
             return {"error": "Specify --all or --threads list"}
-
-        # 安全检查：使用 SafetyFilter 过滤命令
-        safety_level_str = kwargs.get("safety_level", "readonly")
-        try:
-            level = SafetyLevel(safety_level_str)
-        except ValueError:
-            level = SafetyLevel.READONLY
-        sf = SafetyFilter(level)
-        allowed, reason = sf.filter_command(command)
-        if not allowed:
-            return {"error": reason or "Command not allowed", "command": command}
-
-        # The effective GDB command is `thread apply <threads> <command>`;
-        # validate the wrapped verb too so e.g. `... set $r0=1` is blocked.
-        wrapped_result = check_wrapped_command(command, level)
-        if not wrapped_result.allowed:
-            return {
-                "error": wrapped_result.reason or "Command not allowed",
-                "command": command,
-            }
 
         results = []
         orig_thread = gdb.selected_thread()

@@ -57,15 +57,23 @@ class TestSessionMeta(unittest.TestCase):
             started_at=now,
             last_active=now,
             heartbeat_timeout=600,
-            safety_level="readonly",
         )
         self.assertEqual(meta.session_id, "abc12345")
         self.assertEqual(meta.mode, "attach")
         self.assertEqual(meta.binary, "/usr/bin/myapp")
         self.assertEqual(meta.pid, 12345)
         self.assertEqual(meta.gdb_pid, 12346)
-        self.assertEqual(meta.safety_level, "readonly")
         self.assertEqual(meta.heartbeat_timeout, 600)
+
+    def test_session_meta_from_dict_ignores_legacy_safety_level(self):
+        meta = SessionMeta.from_dict({
+            "session_id": "abc12345",
+            "mode": "core",
+            "safety_level": "readonly",
+        })
+        self.assertEqual(meta.session_id, "abc12345")
+        self.assertEqual(meta.mode, "core")
+        self.assertFalse(hasattr(meta, "safety_level"))
 
 
 class TestSessionIsAlive(unittest.TestCase):
@@ -164,7 +172,6 @@ class TestSessionCreation(unittest.TestCase):
             self.assertEqual(session.mode, "core")
             self.assertEqual(session.binary, "/usr/bin/myapp")
             self.assertEqual(session.core, "/tmp/core.1234")
-            self.assertEqual(session.safety_level, "readonly")
             self.assertIsNotNone(session.session_id)
             self.assertEqual(len(session.session_id), 8)
         finally:
@@ -183,11 +190,9 @@ class TestSessionCreation(unittest.TestCase):
                 mode="attach",
                 binary="/usr/bin/myapp",
                 pid=12345,
-                safety_level="readwrite",
             )
             self.assertEqual(session.mode, "attach")
             self.assertEqual(session.pid, 12345)
-            self.assertEqual(session.safety_level, "readwrite")
         finally:
             import shutil
             shutil.rmtree(tmp, ignore_errors=True)

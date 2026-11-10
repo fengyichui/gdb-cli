@@ -143,9 +143,6 @@ gdb-cli attach --pid 9876
 
 # Attach with symbol file
 gdb-cli attach --pid 9876 --binary ./my_program
-
-# Allow memory modification and function calls
-gdb-cli attach --pid 9876 --allow-write --allow-call
 ```
 
 ## Full Command Reference
@@ -176,8 +173,6 @@ gdb-cli attach --pid <pid> [options]
   --scheduler-locking     Enable scheduler-locking (default: true)
   --non-stop              Enable non-stop mode (default: true)
   --timeout               Heartbeat timeout in seconds (default: 600)
-  --allow-write           Allow memory modification
-  --allow-call            Allow function calls
 ```
 
 ### threads — List Threads
@@ -270,22 +265,13 @@ gdb-cli thread-apply -s <session> <command> --threads "1,3,5"
 }
 ```
 
-## Security Mechanisms
+## Command Execution
 
-### Command Filter (attach / target / jlink)
-
-| Safety level | Behavior |
-|--------------|----------|
-| `off` (default) | No command filtering. Includes `source`, `python`, `shell` and multi-line input. |
-| `readonly` (`--safe`) | bt, info, print, threads, locals, frame |
-| `readwrite` (`--safe --allow-write`) | + set, monitor |
-| `full` (`--safe --allow-call`) | + call, continue, step, next |
-
-The filter is only enabled by `--safe`. While enabled, `quit`, `kill`,
-`shell`, `signal`, `python`, `python-interactive`, `source`, `detach`,
-`attach`, `target` and multi-line commands are always blocked. With the
-default `off` level these commands run unfiltered, so `exec "quit"` or
-`exec "kill"` can terminate the session or inferior.
+`gdb-cli exec` runs GDB commands without a whitelist or safety level.
+Commands such as `source`, `python`, `shell`, `quit`, `kill`, `detach`
+and multi-line scripts are allowed. This also means `exec "quit"` or
+`exec "kill"` can terminate the session or inferior; use
+`gdb-cli stop` / `gdb-cli jlink stop` for lifecycle management.
 
 ### Heartbeat Timeout
 
@@ -319,7 +305,6 @@ src/gdb_cli/
 ├── client.py           # Unix Socket client
 ├── launcher.py         # GDB process launcher
 ├── session.py          # Session metadata management
-├── safety.py           # Command whitelist filter
 ├── formatters.py       # JSON output formatting
 ├── env_check.py        # Environment check
 ├── errors.py           # Error classification

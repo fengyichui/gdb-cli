@@ -82,20 +82,12 @@ ZH_CN_CATALOG = {
     "cli.attach.scheduler_locking_help": "启用 scheduler-locking",
     "cli.attach.non_stop_help": "启用 non-stop 模式",
     "cli.attach.timeout_help": "心跳超时秒数 (默认 600)",
-    "cli.attach.allow_write_help": "允许内存修改",
-    "cli.attach.allow_call_help": "允许函数调用",
-
-    # === target command ===
     "cli.target.remote_help": "远程目标地址 (host:port 或 [ipv6]:port)",
     "cli.target.binary_help": "可执行文件路径 (可选)",
     "cli.target.remote_mode_help": "远程连接模式 (remote/extended-remote)",
     "cli.target.scheduler_locking_help": "启用 scheduler-locking",
     "cli.target.non_stop_help": "启用 non-stop 模式",
     "cli.target.timeout_help": "心跳超时秒数 (默认 600)",
-    "cli.target.allow_write_help": "允许内存修改",
-    "cli.target.allow_call_help": "允许函数调用",
-
-    # === eval-cmd command ===
     "cli.eval_cmd.doc": "求值 C/C++ 表达式",
     "cli.eval_cmd.session_help": "会话 ID",
     "cli.eval_cmd.max_depth_help": "递归深度限制",
@@ -130,9 +122,6 @@ ZH_CN_CATALOG = {
     # === exec command ===
     "cli.exec.doc": "执行原始 GDB 命令",
     "cli.exec.session_help": "会话 ID",
-    "cli.exec.safety_level_help": "安全级别 (off/readonly/readwrite/full)",
-
-    # === stop command ===
     "cli.stop.doc": "停止会话，安全退出 GDB",
     "cli.stop.session_help": "会话 ID",
     "cli.stop.before_detach_help": (
@@ -220,11 +209,6 @@ ZH_CN_CATALOG = {
     "cli.jlink.restart.doc": "重启 JLinkGDBServer 实例（复用已保存的 GDB 会话设置）",
     "cli.jlink.status.doc": "查看 JLinkGDBServer 实例状态",
     "cli.jlink.devices.doc": "列出已连接的 J-Link 调试器",
-    "cli.safe_help": (
-        "启用安全过滤（默认 off = 不做任何命令检查）。加 --safe 后会话从 "
-        "readonly 开始，并额外拦截宿主代码执行命令（source/python/shell）"
-        "和多行输入；--allow-write/--allow-call 逐级放宽目标操作。"
-    ),
     "cli.jlink.device_help": "目标设备名（如 nRF54L15_M33）",
     "cli.jlink.select_help": "调试器选择器：usb=<序号|昵称> 或 ip=HOST:PORT",
     "cli.jlink.binary_help": "GDB 会话要加载的可执行文件路径（可选）",
@@ -236,8 +220,6 @@ ZH_CN_CATALOG = {
     ),
     "cli.jlink.interface_help": "调试接口（SWD/JTAG）",
     "cli.jlink.port_help": "GDB Server 端口（默认自动选择空闲端口）",
-    "cli.jlink.allow_write_help": "允许内存修改",
-    "cli.jlink.allow_call_help": "允许函数调用",
     "cli.jlink.timeout_help": "GDB 心跳超时秒数（默认 600）",
     "cli.jlink.extra_arg_help": "额外透传的 JLinkGDBServer 原始参数（可重复）",
     "cli.jlink.jlink_id_help": "J-Link 实例 ID",
@@ -291,7 +273,6 @@ ZH_CN_CATALOG = {
     "errors.no_debug_info.suggestion": "尝试加载 debuginfo: 'dnf debuginfo-install' 或检查 .debug 文件",
     "errors.process_not_found.suggestion": "检查进程是否存在: 'ps aux | grep <进程名>'",
     "errors.ptrace_denied.suggestion": "运行: 'echo 0 | sudo tee /proc/sys/kernel/yama/ptrace_scope'",
-    "errors.command_blocked.suggestion": "该命令被安全策略阻止，使用 --allow-write 或 --allow-call 参数",
     "errors.command_timeout.suggestion": "命令执行超时，尝试增加 --timeout 参数或简化操作",
     "errors.load_timeout.suggestion": "core 文件加载超时，可能文件过大，尝试增加超时时间",
     "errors.socket_not_found.suggestion": "GDB 会话可能已终止，重新运行 'gdb-cli load' 或 'gdb-cli attach'",

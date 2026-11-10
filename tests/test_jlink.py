@@ -629,9 +629,6 @@ class TestJLinkCLI(unittest.TestCase):
             "rtos": None,
             "interface": "SWD",
             "port": 2331,
-            "allow_write": False,
-            "allow_call": False,
-            "safety": False,
             "timeout": 600,
             "extra_args": (),
         }
@@ -659,31 +656,10 @@ class TestJLinkCLI(unittest.TestCase):
         mock_start.assert_called_once()
         launch_kwargs = mock_launch.call_args.kwargs
         assert launch_kwargs["remote"] == "127.0.0.1:2331"
-        # Safety is off by default (full access) — no --safe passed.
-        assert launch_kwargs["safety"] == "full"
         payload = mock_print.call_args.args[0]
         assert payload["status"] == "started"
         assert payload["jlink_id"] == "abcd1234"
         assert payload["session_id"] == "sess1234"
-
-    def test_safe_flag_enables_readonly_session(self):
-        ctx = _FakeContext(invoked_subcommand=None)
-        _FakeClick._context = ctx
-        fake_process = types.SimpleNamespace(
-            session=types.SimpleNamespace(
-                session_id="sess1234", sock_path="/tmp/fake.sock"
-            )
-        )
-
-        with patch.object(self.cli, "start_gdbserver", return_value=self._instance()), \
-             patch.object(self.cli, "launch_target", return_value=fake_process) as mock_launch, \
-             patch.object(self.cli, "_wait_session_ready",
-                          return_value={"state": "ready"}), \
-             patch.object(self.cli, "_save_instance"), \
-             patch.object(self.cli, "print_json"):
-            self._call_jlink(safety=True)
-
-        assert mock_launch.call_args.kwargs["safety"] == "on"
 
     def test_rtos_option_injects_plugin_path(self):
         ctx = _FakeContext(invoked_subcommand=None)
@@ -841,9 +817,6 @@ def _start_kwargs(**overrides):
         "rtos": None,
         "interface": "SWD",
         "port": 2331,
-        "allow_write": False,
-        "allow_call": False,
-        "safety": False,
         "timeout": 600,
         "extra_args": (),
     }
@@ -1072,8 +1045,6 @@ def test_restart_reconnects_with_persisted_config(cli_module, jlink_dir):
         session_config={
             "binary": "fw.elf",
             "gdb_path": "arm-gdb",
-            "allow_write": True,
-            "allow_call": False,
             "timeout": 120,
         },
     )
@@ -1099,10 +1070,7 @@ def test_restart_reconnects_with_persisted_config(cli_module, jlink_dir):
     assert captured == {
         "binary": "fw.elf",
         "gdb_path": "arm-gdb",
-        "allow_write": True,
-        "allow_call": False,
         "timeout": 120,
-        "safety": "on",
     }
     payload = mock_print.call_args.args[0]
     assert payload["session_id"] == "newsess"

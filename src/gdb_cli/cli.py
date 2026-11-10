@@ -156,18 +156,12 @@ def load(
 @click.option("--scheduler-locking/--no-scheduler-locking", default=True, help=t("cli.attach.scheduler_locking_help"))
 @click.option("--non-stop/--no-non-stop", default=True, help=t("cli.attach.non_stop_help"))
 @click.option("--timeout", default=600, help=t("cli.attach.timeout_help"))
-@click.option("--allow-write", is_flag=True, help=t("cli.attach.allow_write_help"))
-@click.option("--allow-call", is_flag=True, help=t("cli.attach.allow_call_help"))
-@click.option("--safe/--no-safe", "safety", default=False, help=t("cli.safe_help"))
 def attach(
     pid: int,
     binary: Optional[str],
     scheduler_locking: bool,
     non_stop: bool,
-    timeout: int,
-    allow_write: bool,
-    allow_call: bool,
-    safety: bool
+    timeout: int
 ) -> None:
     """Attach to running process"""
     # 检查是否已有相同 PID 的会话 (幂等性)
@@ -188,10 +182,7 @@ def attach(
             binary=binary,
             scheduler_locking=scheduler_locking,
             non_stop=non_stop,
-            timeout=timeout,
-            allow_write=allow_write,
-            allow_call=allow_call,
-            safety="on" if safety else "full"
+            timeout=timeout
         )
 
         session = gdb_process.session
@@ -203,7 +194,6 @@ def attach(
             "binary": session.binary,
             "sock_path": session.sock_path,
             "gdb_pid": gdb_process.pid,
-            "safety_level": session.safety_level,
             "status": "started"
         })
 
@@ -224,9 +214,6 @@ def attach(
 @click.option("--scheduler-locking/--no-scheduler-locking", default=False, help=t("cli.target.scheduler_locking_help"))
 @click.option("--non-stop/--no-non-stop", default=False, help=t("cli.target.non_stop_help"))
 @click.option("--timeout", default=600, help=t("cli.target.timeout_help"))
-@click.option("--allow-write", is_flag=True, help=t("cli.target.allow_write_help"))
-@click.option("--allow-call", is_flag=True, help=t("cli.target.allow_call_help"))
-@click.option("--safe/--no-safe", "safety", default=False, help=t("cli.safe_help"))
 @click.option("--gdb-path", default="gdb", help=t("cli.load.gdb_path_help"))
 def target(
     remote: str,
@@ -235,9 +222,6 @@ def target(
     scheduler_locking: bool,
     non_stop: bool,
     timeout: int,
-    allow_write: bool,
-    allow_call: bool,
-    safety: bool,
     gdb_path: str,
 ) -> None:
     """Connect to remote GDB server"""
@@ -265,10 +249,7 @@ def target(
             scheduler_locking=scheduler_locking,
             non_stop=non_stop,
             timeout=timeout,
-            allow_write=allow_write,
-            allow_call=allow_call,
-            gdb_path=gdb_path,
-            safety="on" if safety else "full"
+            gdb_path=gdb_path
         )
 
         session = gdb_process.session
@@ -280,7 +261,6 @@ def target(
             "binary": session.binary,
             "sock_path": session.sock_path,
             "gdb_pid": gdb_process.pid,
-            "safety_level": session.safety_level,
             "status": "started"
         })
 
@@ -799,15 +779,6 @@ def _jlink_start_options(func):
     )(func)
     func = click.option("--timeout", default=600, help=t("cli.jlink.timeout_help"))(func)
     func = click.option(
-        "--allow-call", is_flag=True, help=t("cli.jlink.allow_call_help")
-    )(func)
-    func = click.option(
-        "--allow-write", is_flag=True, help=t("cli.jlink.allow_write_help")
-    )(func)
-    func = click.option(
-        "--safe/--no-safe", "safety", default=False, help=t("cli.safe_help")
-    )(func)
-    func = click.option(
         "--port", type=_PORT_TYPE, default=None,
         help=t("cli.jlink.port_help"),
     )(func)
@@ -842,9 +813,6 @@ _JLINK_START_OPTION_NAMES = (
     "rtos",
     "interface",
     "port",
-    "allow_write",
-    "allow_call",
-    "safety",
     "timeout",
     "extra_args",
 )
@@ -1003,20 +971,14 @@ def _connect_gdb_session(
     *,
     binary: Optional[str],
     gdb_path: str,
-    allow_write: bool,
-    allow_call: bool,
     timeout: int,
-    safety: str = "on",
 ) -> str:
     """Create a GDB session for ``instance`` and wait until it is ready."""
     gdb_process = launch_target(
         remote=f"127.0.0.1:{instance.port}",
         binary=binary,
         timeout=timeout,
-        allow_write=allow_write,
-        allow_call=allow_call,
         gdb_path=gdb_path,
-        safety=safety,
     )
     session = gdb_process.session
     # Record the id immediately so failure cleanup can find the session.
@@ -1024,10 +986,7 @@ def _connect_gdb_session(
     instance.session_config = {
         "binary": binary,
         "gdb_path": gdb_path,
-        "allow_write": allow_write,
-        "allow_call": allow_call,
         "timeout": timeout,
-        "safety": safety,
     }
 
     _wait_session_ready(session.sock_path)
@@ -1091,9 +1050,6 @@ def jlink(
     rtos: Optional[str],
     interface: str,
     port: Optional[int],
-    allow_write: bool,
-    allow_call: bool,
-    safety: bool,
     timeout: int,
     extra_args,
 ) -> None:
@@ -1118,9 +1074,6 @@ def jlink(
         rtos=rtos,
         interface=interface,
         port=port,
-        allow_write=allow_write,
-        allow_call=allow_call,
-        safety=safety,
         timeout=timeout,
         extra_args=extra_args,
     )
@@ -1138,9 +1091,6 @@ def jlink_start(
     rtos: Optional[str],
     interface: str,
     port: Optional[int],
-    allow_write: bool,
-    allow_call: bool,
-    safety: bool,
     timeout: int,
     extra_args,
 ) -> None:
@@ -1157,9 +1107,6 @@ def jlink_start(
         rtos = merged.get("rtos", rtos)
         interface = merged.get("interface", interface)
         port = merged.get("port", port)
-        allow_write = merged.get("allow_write", allow_write)
-        allow_call = merged.get("allow_call", allow_call)
-        safety = merged.get("safety", safety)
         timeout = merged.get("timeout", timeout)
         extra_args = merged.get("extra_args", extra_args)
 
@@ -1202,10 +1149,7 @@ def jlink_start(
             instance,
             binary=binary,
             gdb_path=gdb_path,
-            allow_write=allow_write,
-            allow_call=allow_call,
             timeout=timeout,
-            safety="on" if safety else "full",
         )
     except BaseException as exc:
         # Roll the whole transaction back; cleanup errors must not replace the
@@ -1341,10 +1285,7 @@ def jlink_restart(jlink_id: Optional[str]) -> None:
             restarted,
             binary=config.get("binary"),
             gdb_path=config.get("gdb_path") or "gdb",
-            allow_write=bool(config.get("allow_write", False)),
-            allow_call=bool(config.get("allow_call", False)),
             timeout=config.get("timeout", 600),
-            safety=config.get("safety", "on"),
         )
     except BaseException as exc:
         cleanup_errors = _cleanup_failed_instance(restarted)
