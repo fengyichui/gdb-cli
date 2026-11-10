@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.5.0] - 2026-11-10
 
 ### Added
+- `jlink restart` now keeps the same session_id across a restart, so
+  callers' `$SESSION` references survive.
 - `gdb-cli stop -s <session>` now also stops the JLinkGDBServer bound to
   a session that was started by `jlink`.
 - `jlink --rtos` lists the supported RTOS plugins in all locales without

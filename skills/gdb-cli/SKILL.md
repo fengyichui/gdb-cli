@@ -75,7 +75,7 @@ gdb-cli jlink -d <device_name> --select ip=<host>:<port> \
 
 # Lifecycle
 gdb-cli jlink status                                  # list managed servers (+ session binding)
-gdb-cli jlink restart                                 # restart server + reconnect GDB session
+gdb-cli jlink restart                                 # restart server + reconnect (session_id stays the same)
 gdb-cli jlink stop --all                              # stop GDB session + server, clean up
 
 # RTOS thread awareness (FreeRTOS etc.): use the standard --rtos option
@@ -414,7 +414,7 @@ gdb-cli stop -s $SESSION
 # Optional pre-detach hook for non-J-Link cases (e.g. attached processes)
 gdb-cli stop -s $SESSION --before-detach "<commands>"
 
-# J-Link lifecycle: restart both, or stop servers started outside gdb-cli
+# J-Link lifecycle: restart both (session_id stays the same), or stop servers started outside gdb-cli
 gdb-cli jlink restart
 gdb-cli jlink stop --all   # only needed if you did NOT already `stop` the session
 ```

@@ -63,7 +63,8 @@ def create_session(
     core: Optional[str] = None,
     pid: Optional[int] = None,
     remote: Optional[str] = None,
-    timeout: int = 600
+    timeout: int = 600,
+    session_id: Optional[str] = None
 ) -> SessionMeta:
     """
     创建新会话
@@ -75,12 +76,14 @@ def create_session(
         pid: 目标进程 PID
         remote: host:port
         timeout: 心跳超时秒数
+        session_id: 复用的会话 ID（None = 生成新 ID；用于 jlink restart
+            保持会话 ID 不变）
 
     Returns:
         SessionMeta 实例
     """
     # 生成 session ID
-    session_id = str(uuid.uuid4())[:8]
+    session_id = session_id or str(uuid.uuid4())[:8]
 
     # 创建 session 目录
     session_dir = SESSION_DIR / session_id

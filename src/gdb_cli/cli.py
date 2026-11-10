@@ -1003,13 +1003,19 @@ def _connect_gdb_session(
     binary: Optional[str],
     gdb_path: str,
     timeout: int,
+    session_id: Optional[str] = None,
 ) -> str:
-    """Create a GDB session for ``instance`` and wait until it is ready."""
+    """Create a GDB session for ``instance`` and wait until it is ready.
+
+    ``session_id`` reuses a previous session id (jlink restart keeps the
+    session id stable so callers' references survive a restart).
+    """
     gdb_process = launch_target(
         remote=f"127.0.0.1:{instance.port}",
         binary=binary,
         timeout=timeout,
         gdb_path=gdb_path,
+        session_id=session_id,
     )
     session = gdb_process.session
     # Record the id immediately so failure cleanup can find the session.
@@ -1291,6 +1297,10 @@ def jlink_restart(jlink_id: Optional[str]) -> None:
                 t("cli.jlink.no_instance", instance_id=resolved)
             )
 
+        # Keep the session id stable across the restart so callers'
+        # references (e.g. $SESSION in scripts) survive.  Capture it
+        # before _stop_associated_session clears the field.
+        previous_session_id = instance.session_id
         session_cleanup_errors = _stop_associated_session(instance)
         stop_result = stop_instance(resolved)
         if stop_result.get("status") == "stop_failed":
@@ -1309,7 +1319,8 @@ def jlink_restart(jlink_id: Optional[str]) -> None:
         raise click.exceptions.Exit(1)
 
     # Reconnect using the persisted session settings; users who want different
-    # settings should stop and start again.
+    # settings should stop and start again.  The previous session id is
+    # reused so callers do not have to track a new one after a restart.
     config = dict(instance.session_config or {})
     try:
         session_id = _connect_gdb_session(
@@ -1317,6 +1328,7 @@ def jlink_restart(jlink_id: Optional[str]) -> None:
             binary=config.get("binary"),
             gdb_path=config.get("gdb_path") or "gdb",
             timeout=config.get("timeout", 600),
+            session_id=previous_session_id or None,
         )
     except BaseException as exc:
         cleanup_errors = _cleanup_failed_instance(restarted)

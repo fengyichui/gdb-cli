@@ -224,7 +224,8 @@ def launch_target(
     non_stop: bool = False,
     timeout: int = 600,
     gdb_path: str = "gdb",
-    remote_mode: str = "extended-remote"
+    remote_mode: str = "extended-remote",
+    session_id: Optional[str] = None
 ) -> GDBProcess:
     """
     Args:
@@ -248,7 +249,8 @@ def launch_target(
         mode="target",
         remote=remote,
         binary=binary,
-        timeout=timeout
+        timeout=timeout,
+        session_id=session_id
     )
 
     # 构建 GDB 启动命令

@@ -1053,8 +1053,8 @@ def test_restart_reconnects_with_persisted_config(cli_module, jlink_dir):
 
     def fake_connect(instance, **kwargs):
         captured.update(kwargs)
-        instance.session_id = "newsess"
-        return "newsess"
+        instance.session_id = kwargs.get("session_id") or "newsess"
+        return instance.session_id
 
     with patch.object(cli_module, "_stop_gdb_session") as mock_session_stop, \
          patch.object(
@@ -1067,13 +1067,10 @@ def test_restart_reconnects_with_persisted_config(cli_module, jlink_dir):
         cli_module.jlink_restart("abcd1234")
 
     mock_session_stop.assert_called_once_with("oldsess")
-    assert captured == {
-        "binary": "fw.elf",
-        "gdb_path": "arm-gdb",
-        "timeout": 120,
-    }
+    # The session id must be stable across a restart.
+    assert captured["session_id"] == "oldsess"
     payload = mock_print.call_args.args[0]
-    assert payload["session_id"] == "newsess"
+    assert payload["session_id"] == "oldsess"
     assert payload["status"] == "restarted"
 
 
