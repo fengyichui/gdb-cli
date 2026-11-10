@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `gdb-cli stop -s <session>` now also stops the JLinkGDBServer bound to
+  a session that was started by `jlink`.
 - `jlink --rtos` lists the supported RTOS plugins in all locales without
   exposing the internal plugin path.
 

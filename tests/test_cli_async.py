@@ -132,6 +132,7 @@ class TestCLIAsyncBehavior(unittest.TestCase):
 
         with patch.object(self.cli, "get_client", return_value=fake_client), \
              patch.object(self.cli, "get_session", return_value=meta), \
+             patch.object(self.cli, "list_instances", return_value=[]), \
              patch.object(self.cli.os, "kill", side_effect=OSError()), \
              patch("gdb_cli.session.cleanup_session", return_value=True) as mock_cleanup, \
              patch.object(self.cli, "print_json") as mock_print_json:
@@ -143,6 +144,32 @@ class TestCLIAsyncBehavior(unittest.TestCase):
         self.assertEqual(payload["status"], "stopped")
         self.assertTrue(payload["detached"])
 
+    def test_stop_stops_bound_jlink_server(self):
+        fake_client = Mock()
+        fake_client.__enter__ = Mock(return_value=fake_client)
+        fake_client.__exit__ = Mock(return_value=False)
+        fake_client.call.return_value = {"detached": True, "errors": []}
+        meta = types.SimpleNamespace(gdb_pid=4242, started_at=time.time())
+        bound = types.SimpleNamespace(
+            session_id="abc12345", instance_id="jlink01",
+        )
+
+        with patch.object(self.cli, "get_client", return_value=fake_client), \
+             patch.object(self.cli, "get_session", return_value=meta), \
+             patch.object(self.cli, "list_instances", return_value=[bound]), \
+             patch.object(
+                 self.cli, "stop_instance",
+                 return_value={"jlink_id": "jlink01", "status": "stopped"},
+             ) as mock_stop, \
+             patch.object(self.cli.os, "kill", side_effect=OSError()), \
+             patch("gdb_cli.session.cleanup_session", return_value=True), \
+             patch.object(self.cli, "print_json") as mock_print_json:
+            self.cli.stop("abc12345", None, False)
+
+        mock_stop.assert_called_once_with("jlink01")
+        payload = mock_print_json.call_args.args[0]
+        self.assertEqual(payload["jlink"][0]["status"], "stopped")
+
     def test_stop_waits_for_process_exit_before_cleanup(self):
         fake_client = Mock()
         fake_client.__enter__ = Mock(return_value=fake_client)
@@ -152,6 +179,7 @@ class TestCLIAsyncBehavior(unittest.TestCase):
 
         with patch.object(self.cli, "get_client", return_value=fake_client), \
              patch.object(self.cli, "get_session", return_value=meta), \
+             patch.object(self.cli, "list_instances", return_value=[]), \
              patch.object(self.cli.os, "kill", side_effect=[None, OSError()]) as mock_kill, \
              patch.object(self.cli.time, "sleep") as mock_sleep, \
              patch("gdb_cli.session.cleanup_session", return_value=True) as mock_cleanup, \
@@ -176,6 +204,7 @@ class TestCLIAsyncBehavior(unittest.TestCase):
 
     def test_stop_rpc_failure_with_force_cleans_up(self):
         with patch.object(self.cli, "get_client", side_effect=self.cli.GDBClientError("dead")), \
+             patch.object(self.cli, "list_instances", return_value=[]), \
              patch("gdb_cli.session.cleanup_session", return_value=True) as mock_cleanup, \
              patch.object(self.cli, "print_json") as mock_print_json:
             self.cli.stop("abc12345", None, True)

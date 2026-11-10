@@ -115,9 +115,9 @@ gdb-cli jlink -d <device_name> --select usb=<sn> --binary <fw.elf> \
   Verified on OM6628X (ARM_CM33 non-secure): after the scheduler starts,
   `threads` lists IDLE/shell/Tmr Svc/No Name with priorities, and
   per-thread `bt` works.
-- `jlink stop` stops the GDB session AND the server. Plain
-  `gdb-cli stop --session <id>` stops only the GDB session and keeps the
-  server listening (useful to reconnect quickly with `gdb-cli target`).
+- `jlink stop` stops the GDB session AND the server. `gdb-cli stop -s
+  <id>` also stops the JLink server when that session was started by
+  `jlink`; for a plain `target` session it only stops GDB.
 - On success the output contains BOTH `jlink_id` and `session_id`. Any
   failure exits non-zero with the reason (e.g. GDBServer log tail for a bad
   device name) and leaves no orphan processes.

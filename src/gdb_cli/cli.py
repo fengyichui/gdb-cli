@@ -396,6 +396,26 @@ def exec_cmd(session: str, command: str) -> None:
         raise click.exceptions.Exit(1)
 
 
+def _stop_bound_jlink_instances(session_id: str):
+    """Stop JLink servers whose persisted ``session_id`` matches."""
+    stopped = []
+    errors = []
+    for instance in list_instances():
+        if instance.session_id != session_id:
+            continue
+        try:
+            result = stop_instance(instance.instance_id)
+            if result.get("status") == "stop_failed":
+                errors.append(
+                    f"JLinkGDBServer {instance.instance_id} did not stop"
+                )
+            else:
+                stopped.append(result)
+        except Exception as exc:
+            errors.append(f"stop_instance {instance.instance_id}: {exc}")
+    return stopped, errors
+
+
 @main.command()
 @click.option("--session", "-s", required=True, help=t("cli.stop.session_help"))
 @click.option("--before-detach", help=t("cli.stop.before_detach_help"))
@@ -416,10 +436,16 @@ def stop(session: str, before_detach: Optional[str], force: bool) -> None:
         if not cleanup_session(session):
             print_error(t("cli.stop.cleanup_failed", session_id=session), session)
             raise click.exceptions.Exit(1)
-        print_json({
+        jlink_stopped, jlink_errors = _stop_bound_jlink_instances(session)
+        payload = {
             "session_id": session,
             "status": "force_stopped"
-        })
+        }
+        if jlink_stopped:
+            payload["jlink"] = jlink_stopped
+        if jlink_errors:
+            payload["jlink_errors"] = jlink_errors
+        print_json(payload)
         return
 
     # Graceful path: give the GDB process time to exit on its own before
@@ -439,6 +465,7 @@ def stop(session: str, before_detach: Optional[str], force: bool) -> None:
         print_error(t("cli.stop.cleanup_failed", session_id=session), session)
         raise click.exceptions.Exit(1)
 
+    jlink_stopped, jlink_errors = _stop_bound_jlink_instances(session)
     output = {
         "session_id": session,
         "status": "stopped",
@@ -446,6 +473,10 @@ def stop(session: str, before_detach: Optional[str], force: bool) -> None:
     }
     if result.get("errors"):
         output["detach_errors"] = result["errors"]
+    if jlink_stopped:
+        output["jlink"] = jlink_stopped
+    if jlink_errors:
+        output["jlink_errors"] = jlink_errors
     print_json(output)
 
 
