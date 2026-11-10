@@ -855,6 +855,17 @@ _JLINK_START_OPTION_NAMES = (
 
 _SESSION_READY_POLL_INTERVAL = 0.2
 
+# J-Link device configuration applied automatically on every connect,
+# before any user --init-cmd.  Low-power handling keeps the debug link
+# alive when the target enters deep sleep; disabling the flash cache
+# guarantees memory reads see the real chip state instead of cached
+# contents.
+_DEFAULT_JLINK_INIT_CMDS = [
+    "monitor exec EnableLowPowerHandlingMode",
+    "monitor exec SetAllowFlashCache = 0",
+]
+
+
 
 def _is_commandline(source) -> bool:
     """True when a click ``ParameterSource`` came from the command line.
@@ -1223,7 +1234,7 @@ def jlink_start(
             binary=binary,
             gdb_path=gdb_path,
             timeout=timeout,
-            init_cmds=list(init_cmds or ()),
+            init_cmds=_DEFAULT_JLINK_INIT_CMDS + list(init_cmds or ()),
         )
     except BaseException as exc:
         # Roll the whole transaction back; cleanup errors must not replace the

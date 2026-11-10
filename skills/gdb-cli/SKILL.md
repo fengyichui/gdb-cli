@@ -126,11 +126,18 @@ gdb-cli jlink -d <device_name> --select usb=<sn> --binary <fw.elf> \
   device name) and leaves no orphan processes. ALWAYS pass `--jlink-id` to
   `jlink restart`/`jlink stop`: it is only optional when exactly one
   instance is running, and errors out (ambiguity) with two or more.
+- Device configuration is applied automatically on every connect:
+  `monitor exec EnableLowPowerHandlingMode` (keeps the debug link alive
+  when the target enters deep sleep) and
+  `monitor exec SetAllowFlashCache = 0` (memory reads always see real
+  chip state). They run before any user commands and are replayed by
+  `jlink restart`.
 - `--init-cmd "<gdb command>"` (repeatable) runs once after the session
-  becomes ready, for any per-connect GDB/J-Link configuration. Init
-  commands are persisted with the instance and replayed automatically by
-  `jlink restart`; failures are collected into `init_errors` in the
-  start/restart output instead of failing the session.
+  becomes ready, after the automatic defaults, for any additional
+  per-connect GDB/J-Link configuration. Init commands are persisted with
+  the instance and replayed automatically by `jlink restart`; failures
+  are collected into `init_errors` in the start/restart output instead
+  of failing the session.
 
 Embedded notes: registers are architecture-aware (`pc/sp/lr/xpsr` on
 Cortex-M); `eval` does not auto-dereference pointers by default

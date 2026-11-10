@@ -679,16 +679,37 @@ class TestJLinkCLI(unittest.TestCase):
              patch.object(self.cli, "_run_init_cmds", return_value=[]) as mock_init, \
              patch.object(self.cli, "_save_instance"), \
              patch.object(self.cli, "print_json"):
-            self._call_jlink(
-                init_cmds=("monitor exec EnableLowPowerHandlingMode",
-                           "monitor exec SetAllowFlashCache = 0"),
-            )
+            self._call_jlink()
 
         mock_init.assert_called_once()
-        assert mock_init.call_args.args[1] == [
-            "monitor exec EnableLowPowerHandlingMode",
-            "monitor exec SetAllowFlashCache = 0",
-        ]
+        # Default device configuration is applied even without --init-cmd...
+        assert mock_init.call_args.args[1] == self.cli._DEFAULT_JLINK_INIT_CMDS
+
+    def test_user_init_cmds_run_after_defaults(self):
+        ctx = _FakeContext(invoked_subcommand=None)
+        _FakeClick._context = ctx
+        fake_process = types.SimpleNamespace(
+            session=types.SimpleNamespace(
+                session_id="sess1234", sock_path="/tmp/fake.sock"
+            )
+        )
+
+        with patch.object(self.cli, "start_gdbserver",
+                          return_value=self._instance()), \
+             patch.object(self.cli, "launch_target", return_value=fake_process), \
+             patch.object(self.cli, "_wait_session_ready",
+                          return_value={"state": "ready"}), \
+             patch.object(self.cli, "_run_init_cmds", return_value=[]) as mock_init, \
+             patch.object(self.cli, "_save_instance"), \
+             patch.object(self.cli, "print_json"):
+            self._call_jlink(init_cmds=("monitor exec SetRTTTelnetPort = 1234",))
+
+        mock_init.assert_called_once()
+        # ...and user commands run after the defaults, in order.
+        assert mock_init.call_args.args[1] == (
+            self.cli._DEFAULT_JLINK_INIT_CMDS
+            + ["monitor exec SetRTTTelnetPort = 1234"]
+        )
 
     def test_rtos_option_injects_plugin_path(self):
         ctx = _FakeContext(invoked_subcommand=None)

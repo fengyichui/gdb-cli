@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.5.0] - 2026-11-10
 
 ### Added
+- J-Link sessions now apply device configuration automatically on every
+  connect: `monitor exec EnableLowPowerHandlingMode` and
+  `monitor exec SetAllowFlashCache = 0`. They run before any
+  `--init-cmd` and are replayed by `jlink restart`.
 - `jlink --init-cmd "<gdb command>"` (repeatable): executed automatically
   once the session is ready (e.g. J-Link `monitor exec` device
   configuration). Persisted with the instance and replayed by
