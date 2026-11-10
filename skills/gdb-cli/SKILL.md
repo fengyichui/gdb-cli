@@ -129,9 +129,12 @@ Embedded notes: registers are architecture-aware (`pc/sp/lr/xpsr` on
 Cortex-M); `eval` does not auto-dereference pointers by default
 (MMIO-safe) — use `eval --deref` to opt in; the J-Link `monitor` commands
 (reset/go/halt/regs) are available via
-`gdb-cli exec -s $SESSION "monitor reset"` with no filtering. To leave
-the target running when stopping, use
-`gdb-cli stop -s $SESSION --before-detach "monitor go"`.
+`gdb-cli exec -s $SESSION "monitor reset"` with no filtering.
+JLinkGDBServer halts the CPU on connect and RESUMES it automatically on
+disconnect — no `monitor go` is needed before stopping.
+`gdb-cli stop --before-detach "<commands>"` remains available as a
+generic pre-detach hook (e.g. restore state before detaching an attached
+process), not as a J-Link resume mechanism.
 
 **FreeRTOS manual task traversal (when the RTOS plugin is unavailable or
 the target is halted at boot):** the delayed-list symbols in FreeRTOS
@@ -389,9 +392,12 @@ gdb-cli status -s $SESSION
 # Stop session (cleanup)
 gdb-cli stop -s $SESSION
 
-# Stop session and leave the target running (embedded)
-gdb-cli stop -s $SESSION --before-detach "monitor go"
+# Stop session (J-Link targets resume automatically on disconnect)
+gdb-cli stop -s $SESSION
 # (also stops the bound JLink server; the stop output lists it under "jlink")
+
+# Optional pre-detach hook for non-J-Link cases (e.g. attached processes)
+gdb-cli stop -s $SESSION --before-detach "<commands>"
 
 # J-Link lifecycle: restart both, or stop servers started outside gdb-cli
 gdb-cli jlink restart

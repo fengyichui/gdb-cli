@@ -40,8 +40,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   prevent GUI dialogs on multi-probe hosts
 - `--extra-arg` passthrough for JLinkGDBServer options with reserved
   parameter protection (`-select/-port/-device/-if/-gui/-nogui`)
-- `gdb-cli stop --before-detach` for embedded exit policies (e.g.
-  `monitor go` to leave the target running)
+- `gdb-cli stop --before-detach` pre-detach command hook (rarely needed
+  for J-Link: the server resumes the target automatically on disconnect)
 - `eval --deref` opt-in pointer auto-dereference (default off, MMIO-safe)
 - `target --remote-mode` (remote | extended-remote)
 - Embedded debugging workflow in the gdb-cli skill (Step 1 J-Link entry,

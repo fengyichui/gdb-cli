@@ -128,8 +128,9 @@ ENGLISH_CATALOG = {
     "cli.stop.doc": "Stop session and safely exit GDB",
     "cli.stop.session_help": "Session ID",
     "cli.stop.before_detach_help": (
-        "GDB command(s) to run before detaching, newline-separated "
-        "(e.g. 'monitor go' to leave the target running)"
+        "Optional GDB command(s) to run before detaching, "
+        "newline-separated (rarely needed; J-Link targets resume "
+        "automatically on disconnect)"
     ),
     "cli.stop.force_help": "Force-kill the GDB process if the RPC stop fails",
     "cli.stop.cleanup_failed": "Failed to clean up session: {session_id}",

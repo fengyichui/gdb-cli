@@ -125,8 +125,8 @@ ZH_CN_CATALOG = {
     "cli.stop.doc": "停止会话，安全退出 GDB",
     "cli.stop.session_help": "会话 ID",
     "cli.stop.before_detach_help": (
-        "detach 前执行的 GDB 命令，可多行分隔"
-        "（例如 'monitor go' 让目标继续运行）"
+        "detach 前可选执行的 GDB 命令，可多行分隔"
+        "（一般不需要；J-Link 目标在断开连接后会自动恢复运行）"
     ),
     "cli.stop.force_help": "RPC 停止失败时强制杀死 GDB 进程",
     "cli.stop.cleanup_failed": "清理会话失败: {session_id}",
