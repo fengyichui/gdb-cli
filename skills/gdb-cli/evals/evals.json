@@ -60,8 +60,8 @@
     {
       "id": 8,
       "name": "jlink-rtos-freertos",
-      "prompt": "My firmware at ./fw.elf runs FreeRTOS on an OM6628X behind a J-Link probe (nickname LIQIANG1). I want to see the RTOS tasks while debugging.",
-      "expected_output": "Should start with 'gdb-cli jlink -d OM6628X --select usb=LIQIANG1 --binary ./fw.elf --gdb-path <gdb> --rtos FreeRTOS', then list tasks via 'gdb-cli threads -s <id>'; mention tasks appear once the scheduler is running (resume with 'continue&' then 'interrupt'), and that 'monitor reset [0|1|2]' is available for target resets",
+      "prompt": "My firmware at ./fw.elf runs FreeRTOS on a Cortex-M MCU behind a J-Link probe (nickname DevBoard). I want to see the RTOS tasks while debugging.",
+      "expected_output": "Should start with 'gdb-cli jlink -d <mcu_name> --select usb=DevBoard --binary ./fw.elf --gdb-path <gdb> --rtos FreeRTOS', then list tasks via 'gdb-cli threads -s <id>'; mention tasks appear once the scheduler is running (resume with 'continue&' then 'interrupt'), and that 'monitor reset [0|1|2]' is available for target resets",
       "files": [],
       "assertions": []
     }

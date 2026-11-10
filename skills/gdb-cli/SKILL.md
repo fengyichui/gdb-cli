@@ -112,9 +112,9 @@ gdb-cli jlink -d <device_name> --select usb=<sn> --binary <fw.elf> \
   reset/boot, `threads` can show a single `Thread 57005` (0xDEAD) even
   though `uxCurrentNumberOfTasks > 1`; let it run (`continue&` then
   `interrupt`) and query again.
-  Verified on OM6628X (ARM_CM33 non-secure): after the scheduler starts,
-  `threads` lists IDLE/shell/Tmr Svc/No Name with priorities, and
-  per-thread `bt` works.
+  Verified on real hardware (ARM_CM33 non-secure TrustZone port): after
+  the scheduler starts, `threads` lists all tasks with names and
+  priorities, and per-thread `bt` works.
 - `jlink stop` stops the GDB session AND the server. `gdb-cli stop -s
   <id>` ALSO stops the JLink server when that session was started by
   `jlink` — including with `--before-detach` (check the `jlink` array in
