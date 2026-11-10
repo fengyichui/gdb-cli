@@ -111,7 +111,7 @@ gdb-cli jlink -d <device_name> --select usb=<sn> --binary <fw.elf> \
   running (past `vTaskStartScheduler()`). If the target is halted at
   reset/boot, `threads` can show a single `Thread 57005` (0xDEAD) even
   though `uxCurrentNumberOfTasks > 1`; let it run (`continue&` then
-  `interrupt`, or `monitor go` then `monitor halt`) and query again.
+  `interrupt`) and query again.
   Verified on OM6628X (ARM_CM33 non-secure): after the scheduler starts,
   `threads` lists IDLE/shell/Tmr Svc/No Name with priorities, and
   per-thread `bt` works.
@@ -127,9 +127,16 @@ gdb-cli jlink -d <device_name> --select usb=<sn> --binary <fw.elf> \
 
 Embedded notes: registers are architecture-aware (`pc/sp/lr/xpsr` on
 Cortex-M); `eval` does not auto-dereference pointers by default
-(MMIO-safe) — use `eval --deref` to opt in; the J-Link `monitor` commands
-(reset/go/halt/regs) are available via
-`gdb-cli exec -s $SESSION "monitor reset"` with no filtering.
+(MMIO-safe) — use `eval --deref` to opt in. Prefer native GDB commands
+over the J-Link monitor channel: run/resume with `continue&` (async)
+and stop the target with `interrupt` (the remote equivalent of Ctrl-C);
+read registers with `gdb-cli registers` or
+`exec "info registers <names>"`. The one monitor command worth keeping
+is reset: `gdb-cli exec -s $SESSION "monitor reset"` — optionally with a
+type argument: `monitor reset 0` = NORMAL (core+peripherals via
+SYSRESETREQ/VECTRESET, default), `monitor reset 1` = CORE only
+(peripherals keep state), `monitor reset 2` = RESET pin (core+
+peripherals via the reset pin).
 JLinkGDBServer halts the CPU on connect and RESUMES it automatically on
 disconnect — no `monitor go` is needed before stopping.
 `gdb-cli stop --before-detach "<commands>"` remains available as a
@@ -373,11 +380,19 @@ gdb-cli disasm -s $SESSION --count 12                    # faulting instruction
 gdb-cli eval -s $SESSION "SCB->CFSR"                     # with CMSIS headers
 ```
 
-Reset or resume the target through the J-Link monitor channel:
+Reset the target when needed:
 
 ```bash
-gdb-cli exec -s $SESSION "monitor reset"                 # reset + halt
-gdb-cli exec -s $SESSION "monitor regs"                  # all core registers
+gdb-cli exec -s $SESSION "monitor reset"      # reset + halt (type 0, default)
+gdb-cli exec -s $SESSION "monitor reset 1"    # core only, peripherals keep state
+gdb-cli exec -s $SESSION "monitor reset 2"    # via RESET pin (core + peripherals)
+```
+
+Run and stop the target with native GDB commands:
+
+```bash
+gdb-cli exec -s $SESSION "continue&"          # resume asynchronously
+gdb-cli exec -s $SESSION "interrupt"          # stop (remote Ctrl-C)
 ```
 
 ## Session Management
