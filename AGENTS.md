@@ -40,6 +40,7 @@ CI (`.github/workflows/ci.yml`) runs `ruff check src/ tests/` then `pytest tests
 - Locale keys follow `cli.<command>.<field>_help` / `cli.<command>.doc`. The `jlink` help epilog is a module-level constant shared verbatim by `jlink --help` and `jlink start --help` — keep both pointing at the same object in all three locale files.
 - User-facing messages go through `t()` (i18n); code comments are a mix of Chinese and English — follow the surrounding file.
 - Commit style: conventional commits (`feat:`, `fix:`, `docs:`, `refactor:`, `chore:`), one logical change per commit, hardware verification described in the body when applicable.
+- `docs/superpowers/` holds local working artifacts (brainstorming specs, implementation plans). Keep them on disk for reference, but leave them out of git: the directory is gitignored and untracked. Stage feature changes explicitly; never `git add` this directory.
 - Remotes: `origin` = upstream `Cerdore/gdb-cli`, `mygithub` = fork `fengyichui/gdb-cli`. Work happens on local `main`.
 - When changing jlink/CLI options, also update `skills/gdb-cli/SKILL.md` and `skills/gdb-cli/evals/evals.json` (agent-facing docs) in the same change.
 
