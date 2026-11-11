@@ -245,9 +245,15 @@ ENGLISH_CATALOG = {
     ),
     "cli.jlink.device_required": "Missing --device (JLinkGDBServer requires a device name)",
     "cli.jlink.port_busy": "Port {port} is already in use",
-    "cli.jlink.probe_in_use_warning": (
-        "Probe {select} is already used by J-Link instance {instance_id} "
-        "(port {port}); stop it first if this is unintended"
+    "cli.jlink.session_reused_message": (
+        "A session for this probe already exists; reusing it"
+    ),
+    "cli.jlink.session_reconnected_message": (
+        "The J-Link server is running but its session was gone; reconnected"
+    ),
+    "cli.jlink.probe_device_conflict": (
+        "Probe {select} is already serving device {existing_device} "
+        "(instance {instance_id}); stop it before starting device {device}"
     ),
     "cli.jlink.no_instance": "J-Link instance not found: {instance_id}",
     "cli.jlink.ambiguous_instance": (

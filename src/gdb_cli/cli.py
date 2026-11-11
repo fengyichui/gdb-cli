@@ -27,6 +27,7 @@ from .i18n import t
 from .jlink import (
     JLINK_DIR,
     JLinkManagerError,
+    _resolve_probe_identity,
     _save_instance,
     _validate_extra_args,
     build_gdbserver_cmdline,
@@ -41,6 +42,7 @@ from .jlink import (
 )
 from .launcher import GDBLauncherError, launch_attach, launch_core, launch_target
 from .session import (
+    _is_session_alive,
     cleanup_dead_sessions,
     cleanup_session,
     find_session_by_core,
@@ -1161,6 +1163,40 @@ def jlink(
     )
 
 
+def _find_reusable_instance(select: str, device: str):
+    """Return a running instance serving the same physical probe, or None.
+
+    Probe identity is normalized (USB nickname/serial -> serial, IP ->
+    host:port) so two selects naming the same probe match.  ``device`` is not
+    compared here; the caller decides reuse vs. conflict.
+    """
+    identity = _resolve_probe_identity(select)
+    for existing in list_instances():
+        if not existing.running:
+            continue
+        if _resolve_probe_identity(existing.select) == identity:
+            return existing
+    return None
+
+
+def _reuse_instance_payload(instance, session_id: str, status: str) -> dict:
+    """Build the start-output payload for a reused/reconnected instance."""
+    message_key = (
+        "cli.jlink.session_reused_message"
+        if status == "reused"
+        else "cli.jlink.session_reconnected_message"
+    )
+    return {
+        "jlink_id": instance.instance_id,
+        "port": instance.port,
+        "device": instance.device,
+        "select": instance.select,
+        "session_id": session_id,
+        "status": status,
+        "message": t(message_key),
+    }
+
+
 @jlink.command("start", help=t("cli.jlink.start.doc"), epilog=t("cli.jlink.start_epilog"))
 @_jlink_start_options
 def jlink_start(
@@ -1215,12 +1251,55 @@ def jlink_start(
         print_error(str(e))
         raise click.exceptions.Exit(1)
 
+    # Reuse an existing server on the same physical probe instead of spawning
+    # a second one that would contend for the device.
+    match = _find_reusable_instance(select, device)
+    if match is not None:
+        if match.device != device:
+            print_error(t(
+                "cli.jlink.probe_device_conflict",
+                select=select,
+                existing_device=match.device,
+                instance_id=match.instance_id,
+                device=device,
+            ))
+            raise click.exceptions.Exit(1)
+
+        session = get_session(match.session_id) if match.session_id else None
+        if session is not None and _is_session_alive(session):
+            print_json(_reuse_instance_payload(match, session.session_id, "reused"))
+            return
+
+        # Server is running but its GDB session is gone: reconnect to the same
+        # server (no new process) using the persisted session settings.
+        config = dict(match.session_config or {})
+        try:
+            session_id = _connect_gdb_session(
+                match,
+                binary=config.get("binary"),
+                gdb_path=config.get("gdb_path") or "gdb",
+                timeout=config.get("timeout", 600),
+                init_cmds=config.get("init_cmds") or [],
+            )
+        except BaseException as exc:
+            cleanup_errors = _cleanup_failed_instance(match)
+            print_error(
+                t("cli.jlink.connect_failed"),
+                str(exc) or exc.__class__.__name__,
+                cleanup_errors or None,
+            )
+            if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                raise
+            raise click.exceptions.Exit(1) from exc
+        payload = _reuse_instance_payload(match, session_id, "reconnected")
+        init_errors = getattr(match, "init_errors", None)
+        if init_errors:
+            payload["init_errors"] = init_errors
+        print_json(payload)
+        return
+
     jlink_id = uuid.uuid4().hex[:8]
     log_path = str(JLINK_DIR / f"{jlink_id}.log")
-    duplicate_probes = [
-        existing for existing in list_instances()
-        if existing.running and existing.select == select
-    ]
 
     try:
         instance = start_gdbserver(cmdline, log_path, instance_id=jlink_id)
@@ -1260,14 +1339,6 @@ def jlink_start(
     init_errors = getattr(instance, "init_errors", None)
     if init_errors:
         payload["init_errors"] = init_errors
-    if duplicate_probes:
-        first = duplicate_probes[0]
-        payload["warning"] = t(
-            "cli.jlink.probe_in_use_warning",
-            select=select,
-            instance_id=first.instance_id,
-            port=first.port,
-        )
     print_json(payload)
 
 

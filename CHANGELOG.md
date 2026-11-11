@@ -35,8 +35,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   evaluation.
 - `eval --deref` formats `char*` as a string when GDB reports C `char` as
   `TYPE_CODE_INT` instead of `TYPE_CODE_CHAR`.
-- `jlink` warns when another running instance already uses the same probe
-  selector, instead of silently starting a second GDBServer on that probe.
+- `jlink` reuses an existing server/session when the same physical probe is
+  already served (matching `usb=` serial or nickname, or `ip=` host:port),
+  instead of silently starting a second contending GDBServer. A live session
+  is reused (`status: reused`); a running server whose session died is
+  reconnected (`status: reconnected`); a probe already serving a different
+  device errors out.
 
 ## [0.4.0] - 2026-11-09
 

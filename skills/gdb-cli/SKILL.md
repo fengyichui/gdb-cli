@@ -126,6 +126,16 @@ gdb-cli jlink -d <device_name> --select usb=<sn> --binary <fw.elf> \
   device name) and leaves no orphan processes. ALWAYS pass `--jlink-id` to
   `jlink restart`/`jlink stop`: it is only optional when exactly one
   instance is running, and errors out (ambiguity) with two or more.
+- Starting `jlink` again against a probe that is already served REUSES it
+  instead of spawning a second contending server. The match is by physical
+  probe: `usb=<serial>` and `usb=<nickname>` for the same probe are
+  equivalent, and `ip=<host>:<port>` matches on host:port. If the existing
+  session is alive the output is `status: reused` with the original
+  `jlink_id`/`session_id`; if the server is running but its session died it
+  is `status: reconnected` (same server, fresh session). A probe already
+  serving a DIFFERENT device errors out — stop it first. To change
+  `--rtos`/`--speed`/`--init-cmd` on a running probe, use `jlink restart` or
+  stop+start; a plain re-start reuses the existing configuration.
 - Device configuration is applied automatically on every connect:
   `monitor exec EnableLowPowerHandlingMode` (keeps the debug link alive
   when the target enters deep sleep) and

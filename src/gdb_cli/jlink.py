@@ -143,6 +143,50 @@ def validate_select(select: str) -> str:
     raise JLinkManagerError(t("cli.jlink.select_invalid", value=value))
 
 
+def probe_identity(select: str, devices: Optional[List[dict]] = None) -> str:
+    """Return a stable identity for a ``-select`` value.
+
+    Two selects identify the same physical probe iff their identities match:
+
+    * ``usb=<selector>`` resolves to ``usb:<serial>`` when ``selector`` is a
+      known serial or nickname (case-insensitive) in ``devices`` (the list
+      from :func:`enumerate_usb_devices`).  Unknown selectors fall back to the
+      literal ``usb=<selector>`` so identical-select starts still match even
+      without enumeration.
+    * ``ip=<host>:<port>`` normalizes to ``ip:<host>:<port>`` with a lowercased
+      host.  USB and IP identities never collide (different prefixes).
+    """
+    value = (select or "").strip()
+    if value.startswith("usb="):
+        selector = value[len("usb="):]
+        for device in devices or []:
+            serial = str(device.get("serial", "")).strip()
+            nickname = str(device.get("nickname", "")).strip()
+            if selector.lower() in (serial.lower(), nickname.lower()) and serial:
+                return f"usb:{serial}"
+        return value
+    if value.startswith("ip="):
+        host_port = value[len("ip="):]
+        host, sep, port = host_port.rpartition(":")
+        if sep:
+            return f"ip:{host.lower()}:{port}"
+        return f"ip:{host_port.lower()}"
+    return value
+
+
+def _resolve_probe_identity(select: str) -> str:
+    """Like :func:`probe_identity`, resolving USB nicknames via enumeration.
+
+    Enumeration is best effort: if JLinkExe is unavailable or fails, fall back
+    to the literal selector so reuse still works for identical selects.
+    """
+    try:
+        devices = enumerate_usb_devices()
+    except Exception:
+        devices = None
+    return probe_identity(select, devices)
+
+
 def validate_rtos(rtos: str) -> str:
     """Validate a user supplied RTOS plugin name.
 

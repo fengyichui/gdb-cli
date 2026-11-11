@@ -240,9 +240,13 @@ ZH_CN_CATALOG = {
     ),
     "cli.jlink.device_required": "缺少 --device（JLinkGDBServer 必须指定设备名）",
     "cli.jlink.port_busy": "端口 {port} 已被占用",
-    "cli.jlink.probe_in_use_warning": (
-        "探针 {select} 已被 J-Link 实例 {instance_id} 使用（端口 {port}）；"
-        "如非本意请先停止该实例"
+    "cli.jlink.session_reused_message": "该探针已有会话，直接复用",
+    "cli.jlink.session_reconnected_message": (
+        "J-Link server 仍在运行但其会话已失效，已重新连接"
+    ),
+    "cli.jlink.probe_device_conflict": (
+        "探针 {select} 正在服务设备 {existing_device}（实例 {instance_id}）；"
+        "请先停止它，再启动设备 {device}"
     ),
     "cli.jlink.no_instance": "未找到 J-Link 实例: {instance_id}",
     "cli.jlink.ambiguous_instance": "存在多个 J-Link 实例，请使用 --jlink-id: {instances}",

@@ -500,6 +500,35 @@ def test_enumerate_usb_devices_parses_sample_output(monkeypatch):
     assert run.call_args.kwargs["input"] == "ShowEmuList\nexit\n"
 
 
+def test_probe_identity_usb_serial_and_nickname_resolve_same():
+    devices = [{"serial": "69406159", "nickname": "LIQIANG1"}]
+    assert jlink.probe_identity("usb=69406159", devices) == "usb:69406159"
+    assert jlink.probe_identity("usb=LIQIANG1", devices) == "usb:69406159"
+    assert jlink.probe_identity("usb=liqiang1", devices) == "usb:69406159"
+
+
+def test_probe_identity_usb_unknown_selector_falls_back_to_literal():
+    devices = [{"serial": "69406159", "nickname": "LIQIANG1"}]
+    assert jlink.probe_identity("usb=999", devices) == "usb=999"
+    assert jlink.probe_identity("usb=999", None) == "usb=999"
+
+
+def test_probe_identity_ip_normalizes_host_port():
+    assert jlink.probe_identity("ip=192.168.0.21:2331") == "ip:192.168.0.21:2331"
+    assert jlink.probe_identity("ip=HOST.local:2331") == "ip:host.local:2331"
+
+
+def test_probe_identity_usb_and_ip_never_collide():
+    assert jlink.probe_identity("usb=1") != jlink.probe_identity("ip=1:2331")
+
+
+def test_resolve_probe_identity_survives_enumeration_failure(monkeypatch):
+    def boom(*a, **k):
+        raise jlink.JLinkManagerError("no JLinkExe")
+    monkeypatch.setattr(jlink, "enumerate_usb_devices", boom)
+    assert jlink._resolve_probe_identity("usb=69406159") == "usb=69406159"
+
+
 # ---------------------------------------------------------------------------
 # Task 2: CLI command group tests (FakeClick pattern from test_cli_async)
 # ---------------------------------------------------------------------------
@@ -734,32 +763,81 @@ class TestJLinkCLI(unittest.TestCase):
             "GDBServer/RTOSPlugin_FreeRTOS"
         )
 
-    def test_start_warns_when_probe_already_in_use(self):
-        ctx = _FakeContext(invoked_subcommand=None)
-        _FakeClick._context = ctx
-        fake_process = types.SimpleNamespace(
-            session=types.SimpleNamespace(
-                session_id="sess1234", sock_path="/tmp/fake.sock"
-            )
-        )
+    def test_start_reuses_running_session_on_same_probe(self):
+        _FakeClick._context = _FakeContext(invoked_subcommand=None)
         existing = types.SimpleNamespace(
-            instance_id="old12345", port=5000, select="usb=1", running=True,
+            instance_id="old12345", port=5000, device="D", select="usb=1",
+            running=True, session_id="sess1234",
         )
-
-        with patch.object(self.cli, "list_instances",
-                          return_value=[existing]), \
-             patch.object(self.cli, "start_gdbserver",
-                          return_value=self._instance()), \
-             patch.object(self.cli, "launch_target", return_value=fake_process), \
-             patch.object(self.cli, "_wait_session_ready",
-                          return_value={"state": "ready"}), \
-             patch.object(self.cli, "_save_instance"), \
+        alive_session = types.SimpleNamespace(session_id="sess1234", gdb_pid=1)
+        with patch.object(self.cli, "list_instances", return_value=[existing]), \
+             patch.object(self.cli, "_resolve_probe_identity", side_effect=lambda s: s), \
+             patch.object(self.cli, "get_session", return_value=alive_session), \
+             patch.object(self.cli, "_is_session_alive", return_value=True), \
+             patch.object(self.cli, "start_gdbserver") as mock_start, \
              patch.object(self.cli, "print_json") as mock_print:
             self._call_jlink()
-
+        mock_start.assert_not_called()
         payload = mock_print.call_args.args[0]
-        self.assertIn("warning", payload)
-        self.assertIn("old12345", payload["warning"])
+        assert payload["status"] == "reused"
+        assert payload["session_id"] == "sess1234"
+        assert payload["jlink_id"] == "old12345"
+
+    def test_start_errors_on_device_conflict(self):
+        _FakeClick._context = _FakeContext(invoked_subcommand=None)
+        existing = types.SimpleNamespace(
+            instance_id="old12345", port=5000, device="OTHER", select="usb=1",
+            running=True, session_id="sess1234",
+        )
+        with patch.object(self.cli, "list_instances", return_value=[existing]), \
+             patch.object(self.cli, "_resolve_probe_identity", side_effect=lambda s: s), \
+             patch.object(self.cli, "start_gdbserver") as mock_start, \
+             patch.object(self.cli, "print_error") as mock_error:
+            with pytest.raises(self.cli.click.exceptions.Exit) as exc:
+                self._call_jlink(device="D")
+        assert exc.value.exit_code == 1
+        mock_start.assert_not_called()
+        assert "OTHER" in mock_error.call_args.args[0]
+
+    def test_start_reconnects_when_session_dead_but_server_running(self):
+        _FakeClick._context = _FakeContext(invoked_subcommand=None)
+        existing = types.SimpleNamespace(
+            instance_id="old12345", port=5000, device="D", select="usb=1",
+            running=True, session_id="deadsess",
+            session_config={"binary": None, "gdb_path": "gdb", "timeout": 600,
+                            "init_cmds": []},
+        )
+        with patch.object(self.cli, "list_instances", return_value=[existing]), \
+             patch.object(self.cli, "_resolve_probe_identity", side_effect=lambda s: s), \
+             patch.object(self.cli, "get_session", return_value=None), \
+             patch.object(self.cli, "start_gdbserver") as mock_start, \
+             patch.object(self.cli, "_connect_gdb_session", return_value="newsess") as mock_conn, \
+             patch.object(self.cli, "print_json") as mock_print:
+            self._call_jlink()
+        mock_start.assert_not_called()
+        mock_conn.assert_called_once()
+        payload = mock_print.call_args.args[0]
+        assert payload["status"] == "reconnected"
+        assert payload["session_id"] == "newsess"
+        assert payload["jlink_id"] == "old12345"
+
+    def test_start_reuses_usb_nickname_matching_serial(self):
+        _FakeClick._context = _FakeContext(invoked_subcommand=None)
+        existing = types.SimpleNamespace(
+            instance_id="old12345", port=5000, device="D", select="usb=69406159",
+            running=True, session_id="sess1234",
+        )
+        alive = types.SimpleNamespace(session_id="sess1234", gdb_pid=1)
+        devices = [{"serial": "69406159", "nickname": "LIQIANG1"}]
+        with patch.object(self.cli, "list_instances", return_value=[existing]), \
+             patch.object(self.cli, "enumerate_usb_devices", return_value=devices), \
+             patch.object(self.cli, "get_session", return_value=alive), \
+             patch.object(self.cli, "_is_session_alive", return_value=True), \
+             patch.object(self.cli, "start_gdbserver") as mock_start, \
+             patch.object(self.cli, "print_json") as mock_print:
+            self._call_jlink(select="usb=LIQIANG1")
+        mock_start.assert_not_called()
+        assert mock_print.call_args.args[0]["status"] == "reused"
 
     def test_invalid_rtos_name_exits_before_start(self):
         ctx = _FakeContext(invoked_subcommand=None)

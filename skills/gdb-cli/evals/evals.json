@@ -64,6 +64,14 @@
       "expected_output": "Should start with 'gdb-cli jlink -d <mcu_name> --select usb=DevBoard --binary ./fw.elf --gdb-path <gdb> --rtos FreeRTOS', then list tasks via 'gdb-cli threads -s <id>'; mention tasks appear once the scheduler is running (resume with 'continue&' then 'interrupt'), and that 'monitor reset [0|1|2]' is available for target resets",
       "files": [],
       "assertions": []
+    },
+    {
+      "id": 9,
+      "name": "jlink-probe-reuse",
+      "prompt": "I already started a jlink session on my probe (usb=69406159). Now I want to start another one on the same probe, nickname LIQIANG1, same device. What happens?",
+      "expected_output": "Should explain that a second start against the same physical probe reuses the existing server/session (usb serial and nickname match the same probe): a live session returns status 'reused' with the original jlink_id/session_id, a running server with a dead session returns 'reconnected', and no second contending GDBServer is spawned. A probe already serving a different device errors out; to change config use 'jlink restart' or stop+start",
+      "files": [],
+      "assertions": []
     }
   ]
 }
