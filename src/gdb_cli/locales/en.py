@@ -141,6 +141,13 @@ ENGLISH_CATALOG = {
     # === status command ===
     "cli.status.doc": "Check session status",
     "cli.status.session_help": "Session ID",
+    "cli.wait_stop.doc": (
+        "Wait until the target stops (breakpoint hit, signal, interrupt)"
+    ),
+    "cli.wait_stop.session_help": "Session ID",
+    "cli.wait_stop.timeout_help": (
+        "Maximum seconds to wait; returns stopped=false on timeout (default: 30)"
+    ),
 
     # === eval-element command ===
     "cli.eval_element.doc": "Access array/container element",

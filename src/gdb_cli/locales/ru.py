@@ -143,6 +143,13 @@ RU_CATALOG = {
     # === status command ===
     "cli.status.doc": "Проверить статус сессии",
     "cli.status.session_help": "ID сессии",
+    "cli.wait_stop.doc": (
+        "Ждать остановки цели (точка останова, сигнал, прерывание)"
+    ),
+    "cli.wait_stop.session_help": "ID сессии",
+    "cli.wait_stop.timeout_help": (
+        "Максимум секунд ожидания; по таймауту stopped=false (по умолчанию: 30)"
+    ),
 
     # === eval-element command ===
     "cli.eval_element.doc": "Доступ к элементу массива/контейнера",

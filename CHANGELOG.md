@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.5.0] - 2026-11-10
 
 ### Added
+- `gdb-cli wait-stop -s <session> [--timeout N]`: long-poll stop
+  notification. Blocks until the target stops (breakpoint, watchpoint,
+  signal, or `interrupt`) and returns the stop location with ~60ms latency,
+  instead of polling `threads`. A stop that happened before the call
+  returns immediately (`reason: "already-stopped"`); an exited target
+  returns `reason: "exited"`; the timeout returns `{"stopped": false,
+  "reason": "timeout"}` as a normal outcome. The GDB session keeps serving
+  other commands while a wait-stop is blocked (the worker waits, never the
+  GDB main thread).
 - J-Link sessions now apply device configuration automatically on every
   connect: `monitor exec EnableLowPowerHandlingMode` and
   `monitor exec SetAllowFlashCache = 0`. They run before any

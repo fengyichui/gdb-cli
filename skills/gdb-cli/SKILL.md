@@ -424,6 +424,25 @@ gdb-cli exec -s $SESSION "continue&"          # resume asynchronously
 gdb-cli exec -s $SESSION "interrupt"          # stop (remote Ctrl-C)
 ```
 
+Wait for the target to stop (breakpoint hit, signal, or manual interrupt)
+with `wait-stop` instead of polling `threads`:
+
+```bash
+gdb-cli wait-stop -s $SESSION --timeout 30
+```
+
+- Blocks until the stop, then returns the location: `{"stopped": true,
+  "reason": "breakpoint-hit"|"signal"|"stopped"|"already-stopped", ...,
+  "frame": {"function","file","line","address"}}`. Re-issue after each stop
+  (long-poll: zero traffic while waiting, ~60ms notification latency).
+- A stop that happened BEFORE the call is NOT lost: the target already
+  being stopped returns immediately with `reason: "already-stopped"` and the
+  current frame; an exited target returns `{"stopped": false, "reason":
+  "exited"}`. No gap between a hit and the wait.
+- `--timeout N` returns `{"stopped": false, "reason": "timeout"}` — a normal
+  outcome (exit 0), loop and re-issue it.
+- The GDB session keeps serving other commands while a wait-stop is blocked.
+
 ## Session Management
 
 ```bash

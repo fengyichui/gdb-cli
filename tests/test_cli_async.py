@@ -338,6 +338,46 @@ class TestCLIAsyncBehavior(unittest.TestCase):
 
         mock_print_error.assert_called_once()
 
+    def test_wait_stop_prints_stop_info(self):
+        payload = {"stopped": True, "reason": "breakpoint-hit"}
+        client = Mock()
+        client.wait_stop.return_value = payload
+        client.__enter__ = Mock(return_value=client)
+        client.__exit__ = Mock(return_value=False)
+
+        with patch.object(self.cli, "get_client", return_value=client), \
+             patch.object(self.cli, "print_json") as mock_print:
+            self.cli.wait_stop("abc12345", 30.0)
+
+        client.wait_stop.assert_called_once_with(timeout=30.0)
+        mock_print.assert_called_once_with(payload)
+
+    def test_wait_stop_timeout_is_not_an_error(self):
+        payload = {"stopped": False, "reason": "timeout"}
+        client = Mock()
+        client.wait_stop.return_value = payload
+        client.__enter__ = Mock(return_value=client)
+        client.__exit__ = Mock(return_value=False)
+
+        with patch.object(self.cli, "get_client", return_value=client), \
+             patch.object(self.cli, "print_json") as mock_print, \
+             patch.object(self.cli, "print_error") as mock_error:
+            self.cli.wait_stop("abc12345", 1.0)
+
+        mock_print.assert_called_once_with(payload)
+        mock_error.assert_not_called()
+
+    def test_wait_stop_connection_error_exits_1(self):
+        with patch.object(
+            self.cli, "get_client",
+            side_effect=self.cli.GDBClientError("socket not ready"),
+        ), patch.object(self.cli, "print_error") as mock_error:
+            with self.assertRaises(self.cli.click.exceptions.Exit) as exc:
+                self.cli.wait_stop("abc12345", 30.0)
+
+        self.assertEqual(exc.exception.exit_code, 1)
+        mock_error.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

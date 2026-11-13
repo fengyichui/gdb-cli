@@ -72,6 +72,14 @@
       "expected_output": "Should explain that a second start against the same physical probe reuses the existing server/session (usb serial and nickname match the same probe): a live session returns status 'reused' with the original jlink_id/session_id, a running server with a dead session returns 'reconnected', and no second contending GDBServer is spawned. A probe already serving a different device errors out; to change config use 'jlink restart' or stop+start",
       "files": [],
       "assertions": []
+    },
+    {
+      "id": 10,
+      "name": "wait-stop-breakpoint-hit",
+      "prompt": "I set a hardware breakpoint with 'exec hbreak arch_cpu_idle', resumed with 'continue&', and want to know the moment it hits so I can inspect the frame. How do I get notified instead of polling threads?",
+      "expected_output": "Should use 'gdb-cli wait-stop -s <id> --timeout 30' which long-polls until the stop and returns the frame (function/file/line/address) with reason 'breakpoint-hit' (or 'already-stopped' if the hit happened before the call, 'exited' for a dead target). Timeout returns stopped=false and should be re-issued; other commands keep working while it blocks",
+      "files": [],
+      "assertions": []
     }
   ]
 }

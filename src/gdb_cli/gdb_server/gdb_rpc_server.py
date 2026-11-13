@@ -86,6 +86,11 @@ class GDBRPCServer:
         self._abandoned: set = set()
         self._abandoned_lock = threading.Lock()
 
+        # Long-poll stop waiters: each is a Queue fed by the gdb.events.stop
+        # listener.  The worker thread blocks on it, never the GDB main thread.
+        self._stop_waiters: list = []
+        self._stop_waiters_lock = threading.Lock()
+
         # 命令处理器注册表
         self._handlers: Dict[str, Callable] = {}
         self._register_builtin_handlers()
@@ -153,6 +158,7 @@ class GDBRPCServer:
             "disasm": handlers.handle_disasm,
             "ping": self._handle_ping,
             "stop": self._handle_stop,
+            "wait_stop": self._handle_wait_stop,
         }
 
     def _handle_ping(self, **kwargs) -> dict:
@@ -191,6 +197,131 @@ class GDBRPCServer:
 
         self._stop_requested = True
         return result
+
+    def _handle_wait_stop(self, wait_timeout: float = 30.0, **kwargs) -> dict:
+        """Register a long-poll waiter and return immediately.
+
+        Runs on the GDB main thread, so it must not block: it hands back a
+        marker with a Queue that ``_dispatch`` waits on from the worker thread.
+        The ``gdb.events.stop`` listener fills the queue when the inferior stops.
+
+        A stop that happened BEFORE this call is not lost: if the target is
+        already stopped (or exited), the answer is queued here immediately.
+        """
+        waiter: queue.Queue = queue.Queue()
+        try:
+            thread = gdb.selected_thread()
+        except Exception:
+            thread = None
+
+        is_exited = getattr(thread, "is_exited", None)
+        if thread is not None and is_exited is not None and is_exited():
+            waiter.put({"stopped": False, "reason": "exited"})
+            return {"__wait_stop__": True, "queue": waiter, "timeout": 0.0}
+
+        is_running = getattr(thread, "is_running", None)
+        if thread is not None and is_running is not None and not is_running():
+            # Already stopped (breakpoint hit before wait_stop was issued):
+            # report the current stop location instead of waiting.
+            waiter.put({
+                **self._build_stop_info(None),
+                "reason": "already-stopped",
+            })
+            return {"__wait_stop__": True, "queue": waiter, "timeout": 0.0}
+
+        with self._stop_waiters_lock:
+            self._stop_waiters.append(waiter)
+        return {
+            "__wait_stop__": True,
+            "queue": waiter,
+            "timeout": float(wait_timeout),
+        }
+
+    def _build_stop_info(self, event) -> dict:
+        """Describe why the inferior stopped. Runs on the GDB main thread.
+
+        ``event`` is the gdb.events.stop payload; ``None`` describes the
+        current stop without an event (the already-stopped case).
+        """
+        breakpoints = list(getattr(event, "breakpoints", None) or [])
+        signal_name = getattr(event, "stop_signal", None)
+        if breakpoints:
+            reason = "breakpoint-hit"
+        elif signal_name:
+            reason = "signal"
+        else:
+            reason = "stopped"
+
+        info: Dict[str, Any] = {
+            "stopped": True,
+            "reason": reason,
+            "breakpoint_numbers": [
+                bp.number for bp in breakpoints if getattr(bp, "number", None) is not None
+            ],
+            "signal": signal_name or None,
+            "thread": None,
+            "frame": None,
+        }
+
+        try:
+            thread = gdb.selected_thread()
+        except Exception:
+            thread = None
+        if thread is not None:
+            info["thread"] = {
+                "id": getattr(thread, "num", None),
+                "global_id": getattr(thread, "global_num", None),
+            }
+
+        try:
+            frame = gdb.selected_frame()
+        except Exception:
+            frame = None
+        if frame is not None:
+            frame_info: Dict[str, Any] = {
+                "function": None, "file": None, "line": None, "address": None,
+            }
+            try:
+                frame_info["function"] = frame.name()
+            except Exception:
+                pass
+            try:
+                frame_info["address"] = hex(frame.pc())
+            except Exception:
+                pass
+            try:
+                sal = frame.find_sal()
+                if sal is not None and sal.symtab is not None:
+                    frame_info["file"] = sal.symtab.filename
+                    frame_info["line"] = sal.line
+            except Exception:
+                pass
+            info["frame"] = frame_info
+
+        return info
+
+    def _on_gdb_stop(self, event) -> None:
+        """gdb.events.stop listener (main thread): fan out to all waiters."""
+        try:
+            info = self._build_stop_info(event)
+        except Exception as exc:  # never let the listener break GDB
+            info = {"stopped": True, "reason": "stopped", "error": str(exc)}
+        self._notify_stop_waiters(info)
+
+    def _notify_stop_waiters(self, info: dict) -> None:
+        with self._stop_waiters_lock:
+            waiters = list(self._stop_waiters)
+        for waiter in waiters:
+            waiter.put(info)
+
+    def _wake_stop_waiters(self) -> None:
+        """Release blocked waiters on shutdown so no client hangs."""
+        self._notify_stop_waiters({"stopped": False, "reason": "shutdown"})
+
+    def _unregister_stop_waiter(self, waiter) -> None:
+        with self._stop_waiters_lock:
+            if waiter in self._stop_waiters:
+                self._stop_waiters.remove(waiter)
 
     def _handle_loading_status(self) -> dict:
         """加载阶段的轻量状态查询，不访问 GDB API。"""
@@ -279,6 +410,13 @@ class GDBRPCServer:
 
         self.running = True
 
+        # Stop-event listener for long-poll wait_stop.  Guarded so a GDB build
+        # (or test mock) without the event keeps the rest of the server working.
+        try:
+            gdb.events.stop.connect(self._on_gdb_stop)
+        except Exception:
+            pass
+
         # 启动 accept 线程
         self.accept_thread = threading.Thread(target=self._accept_loop, daemon=True)
         self.accept_thread.start()
@@ -298,6 +436,7 @@ class GDBRPCServer:
     def stop(self) -> None:
         """关闭 socket，清理资源"""
         self.running = False
+        self._wake_stop_waiters()
 
         # 取消心跳定时器
         if self.heartbeat_timer:
@@ -434,6 +573,7 @@ class GDBRPCServer:
         GDB API calls must happen on the main thread, hence post_event().
         """
         self.running = False
+        self._wake_stop_waiters()
 
         for timer in (self.heartbeat_timer, self._loading_timer):
             if timer:
@@ -575,7 +715,24 @@ class GDBRPCServer:
         if status == "error":
             raise RuntimeError(str(result))
 
+        if isinstance(result, dict) and result.get("__wait_stop__"):
+            return self._await_stop(result)
+
         return result
+
+    def _await_stop(self, marker: dict) -> dict:
+        """Block the WORKER thread until a stop event or the wait timeout.
+
+        The handler already returned, so the GDB main thread is free and other
+        commands keep being served while this waits.
+        """
+        waiter = marker["queue"]
+        try:
+            return waiter.get(timeout=marker["timeout"])
+        except queue.Empty:
+            return {"stopped": False, "reason": "timeout"}
+        finally:
+            self._unregister_stop_waiter(waiter)
 
     def _start_heartbeat_timer(self) -> None:
         """(Re)arm the heartbeat timer.

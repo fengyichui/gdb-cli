@@ -3,6 +3,7 @@
 import os
 import sys
 import tempfile
+import threading
 import time
 import types
 import unittest
@@ -561,6 +562,207 @@ class TestSequentialConnections(_ServerTestCase):
                 client.call("eval", expr="x")
         finally:
             server.stop()
+
+
+class TestWaitStop(_ServerTestCase):
+    """Long-poll stop notification: the worker blocks, the main thread never does."""
+
+    @staticmethod
+    def _fake_event(breakpoints=None, stop_signal=None):
+        return types.SimpleNamespace(
+            breakpoints=breakpoints or [],
+            stop_signal=stop_signal,
+        )
+
+    def _setup_gdb_state(self, thread=None, frame=None):
+        self.gdb.selected_thread = Mock(return_value=thread)
+        self.gdb.selected_frame = Mock(return_value=frame)
+
+    def test_wait_stop_handler_returns_marker_without_blocking(self):
+        server = self.make_server()
+        self._setup_gdb_state()
+        result = server._handle_wait_stop(wait_timeout=30.0)
+        self.assertTrue(result["__wait_stop__"])
+        self.assertEqual(result["timeout"], 30.0)
+        self.assertIsNotNone(result["queue"])
+        # Registered so a stop event can reach it.
+        self.assertEqual(len(server._stop_waiters), 1)
+
+    def test_on_gdb_stop_notifies_waiter_with_breakpoint_info(self):
+        server = self.make_server()
+        thread = types.SimpleNamespace(num=2, global_num=7)
+        frame = types.SimpleNamespace(
+            name=lambda: "arch_cpu_idle",
+            pc=lambda: 0x440B4,
+            find_sal=lambda: types.SimpleNamespace(
+                symtab=types.SimpleNamespace(filename="port.c"), line=81
+            ),
+        )
+        self._setup_gdb_state(thread=thread, frame=frame)
+        marker = server._handle_wait_stop(wait_timeout=30.0)
+        bp = types.SimpleNamespace(number=1)
+        server._on_gdb_stop(self._fake_event(breakpoints=[bp]))
+        info = marker["queue"].get(timeout=1.0)
+        self.assertTrue(info["stopped"])
+        self.assertEqual(info["reason"], "breakpoint-hit")
+        self.assertEqual(info["breakpoint_numbers"], [1])
+        self.assertEqual(info["thread"], {"id": 2, "global_id": 7})
+        self.assertEqual(info["frame"]["function"], "arch_cpu_idle")
+        self.assertEqual(info["frame"]["address"], "0x440b4")
+        self.assertEqual(info["frame"]["line"], 81)
+
+    def test_build_stop_info_signal(self):
+        server = self.make_server()
+        self._setup_gdb_state()
+        info = server._build_stop_info(self._fake_event(stop_signal="SIGINT"))
+        self.assertTrue(info["stopped"])
+        self.assertEqual(info["reason"], "signal")
+        self.assertEqual(info["signal"], "SIGINT")
+
+    def test_build_stop_info_plain_stop(self):
+        server = self.make_server()
+        self._setup_gdb_state()
+        info = server._build_stop_info(self._fake_event())
+        self.assertTrue(info["stopped"])
+        self.assertEqual(info["reason"], "stopped")
+        self.assertIsNone(info["thread"])
+        self.assertIsNone(info["frame"])
+
+    def test_multiple_waiters_all_notified(self):
+        server = self.make_server()
+        self._setup_gdb_state()
+        m1 = server._handle_wait_stop(wait_timeout=30.0)
+        m2 = server._handle_wait_stop(wait_timeout=30.0)
+        server._on_gdb_stop(self._fake_event())
+        self.assertTrue(m1["queue"].get(timeout=1.0)["stopped"])
+        self.assertTrue(m2["queue"].get(timeout=1.0)["stopped"])
+
+    def test_dispatch_wait_stop_times_out_and_unregisters(self):
+        server = self.make_server()
+        self._setup_gdb_state()
+        result = server._dispatch({"cmd": "wait_stop", "wait_timeout": 0.05})
+        self.assertFalse(result["stopped"])
+        self.assertEqual(result["reason"], "timeout")
+        self.assertEqual(len(server._stop_waiters), 0)
+
+    def test_dispatch_wait_stop_returns_event(self):
+        server = self.make_server()
+        self._setup_gdb_state()
+
+        def fire():
+            time.sleep(0.1)
+            server._on_gdb_stop(self._fake_event(breakpoints=[types.SimpleNamespace(number=3)]))
+
+        timer = threading.Thread(target=fire)
+        timer.start()
+        try:
+            result = server._dispatch({"cmd": "wait_stop", "wait_timeout": 5.0})
+        finally:
+            timer.join()
+        self.assertTrue(result["stopped"])
+        self.assertEqual(result["reason"], "breakpoint-hit")
+        self.assertEqual(result["breakpoint_numbers"], [3])
+        self.assertEqual(len(server._stop_waiters), 0)
+
+    def test_shutdown_wakes_waiters(self):
+        server = self.make_server()
+        self._setup_gdb_state()
+        marker = server._handle_wait_stop(wait_timeout=30.0)
+        server._wake_stop_waiters()
+        info = marker["queue"].get(timeout=1.0)
+        self.assertFalse(info["stopped"])
+        self.assertEqual(info["reason"], "shutdown")
+
+    def test_wait_stop_returns_immediately_when_already_stopped(self):
+        """A stop that happened BEFORE wait_stop must not wait for a lost event."""
+        server = self.make_server()
+        thread = types.SimpleNamespace(
+            num=2, global_num=7,
+            is_running=lambda: False, is_exited=lambda: False,
+        )
+        frame = types.SimpleNamespace(
+            name=lambda: "arch_cpu_idle",
+            pc=lambda: 0x440B4,
+            find_sal=lambda: None,
+        )
+        self._setup_gdb_state(thread=thread, frame=frame)
+
+        marker = server._handle_wait_stop(wait_timeout=30.0)
+
+        info = marker["queue"].get(timeout=1.0)
+        self.assertTrue(info["stopped"])
+        self.assertEqual(info["reason"], "already-stopped")
+        self.assertEqual(info["thread"], {"id": 2, "global_id": 7})
+        self.assertEqual(info["frame"]["function"], "arch_cpu_idle")
+        # The answer was already in hand: nothing was registered.
+        self.assertEqual(len(server._stop_waiters), 0)
+
+    def test_wait_stop_returns_immediately_when_target_exited(self):
+        server = self.make_server()
+        thread = types.SimpleNamespace(
+            num=2, global_num=7,
+            is_running=lambda: False, is_exited=lambda: True,
+        )
+        self._setup_gdb_state(thread=thread, frame=None)
+
+        marker = server._handle_wait_stop(wait_timeout=30.0)
+
+        info = marker["queue"].get(timeout=1.0)
+        self.assertFalse(info["stopped"])
+        self.assertEqual(info["reason"], "exited")
+        self.assertEqual(len(server._stop_waiters), 0)
+
+    def test_wait_stop_waits_when_target_running(self):
+        server = self.make_server()
+        thread = types.SimpleNamespace(
+            num=2, global_num=7,
+            is_running=lambda: True, is_exited=lambda: False,
+        )
+        self._setup_gdb_state(thread=thread, frame=None)
+
+        marker = server._handle_wait_stop(wait_timeout=30.0)
+
+        self.assertTrue(marker["queue"].empty())
+        self.assertEqual(len(server._stop_waiters), 1)
+
+    def test_main_thread_responsive_while_waiting(self):
+        from gdb_cli.client import GDBClient
+        from gdb_cli.gdb_server.gdb_rpc_server import GDBRPCServer
+
+        sock_path = str(Path(self.temp_dir) / "waitstop.sock")
+        server = GDBRPCServer(
+            sock_path=sock_path,
+            session_meta={"session_id": "ws", "mode": "target"},
+            heartbeat_timeout=0,
+        )
+        # A live inferior so set_ready() does not mark the session as error.
+        self.gdb.inferiors = Mock(return_value=[types.SimpleNamespace(pid=4242, num=1)])
+        server.set_ready()
+        self.gdb.selected_thread = Mock(return_value=None)
+        self.gdb.selected_frame = Mock(return_value=None)
+        server.start()
+        self._servers.append(server)
+        results = {}
+
+        def waiter():
+            client = GDBClient(sock_path, timeout=10.0)
+            results["wait"] = client.call("wait_stop", wait_timeout=5.0)
+
+        t = threading.Thread(target=waiter)
+        t.start()
+        try:
+            time.sleep(0.2)  # let the waiter register
+            # A concurrent ping must succeed while wait_stop is blocked: proof
+            # the GDB main thread is not frozen by the long-poll.
+            ping = GDBClient(sock_path, timeout=5.0).call("ping")
+            self.assertTrue(ping["pong"])
+            server._on_gdb_stop(self._fake_event())
+            t.join(timeout=5.0)
+            self.assertFalse(t.is_alive())
+            self.assertTrue(results["wait"]["stopped"])
+        finally:
+            server.stop()
+            t.join(timeout=2.0)
 
 
 if __name__ == "__main__":

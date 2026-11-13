@@ -570,6 +570,22 @@ def status(session: str) -> None:
         raise click.exceptions.Exit(1)
 
 
+@main.command("wait-stop", help=t("cli.wait_stop.doc"))
+@click.option("--session", "-s", required=True, help=t("cli.wait_stop.session_help"))
+@click.option("--timeout", default=30.0, help=t("cli.wait_stop.timeout_help"))
+def wait_stop(session: str, timeout: float) -> None:
+    """Wait for the target to stop (breakpoint hit, signal, interrupt)"""
+    try:
+        with get_client(session) as client:
+            print_json(client.wait_stop(timeout=timeout))
+    except GDBCommandError as e:
+        print_error(str(e))
+        raise click.exceptions.Exit(1)
+    except GDBClientError as e:
+        print_error(t("errors.connection_error"), str(e))
+        raise click.exceptions.Exit(1)
+
+
 @main.command("eval-element")
 @click.option("--session", "-s", required=True, help=t("cli.eval_element.session_help"))
 @click.argument("expr")

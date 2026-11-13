@@ -137,6 +137,9 @@ ZH_CN_CATALOG = {
     # === status command ===
     "cli.status.doc": "查看会话状态",
     "cli.status.session_help": "会话 ID",
+    "cli.wait_stop.doc": "等待目标停止（断点命中、信号、手动中断）",
+    "cli.wait_stop.session_help": "会话 ID",
+    "cli.wait_stop.timeout_help": "最长等待秒数；超时返回 stopped=false（默认 30）",
 
     # === eval-element command ===
     "cli.eval_element.doc": "访问数组/容器中的特定元素",

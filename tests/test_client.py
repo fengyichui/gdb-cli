@@ -185,6 +185,23 @@ class TestGDBClientConvenienceMethods(unittest.TestCase):
             deref=True,
         )
 
+    def test_wait_stop_socket_timeout_exceeds_server_wait(self):
+        """The server's clean timeout must win over a socket timeout."""
+        with patch.object(GDBClient, "call", return_value={}) as mock_call:
+            self.client.wait_stop(timeout=30.0)
+
+        mock_call.assert_called_once_with(
+            "wait_stop", timeout=35.0, wait_timeout=30.0
+        )
+
+    def test_wait_stop_custom_timeout(self):
+        with patch.object(GDBClient, "call", return_value={}) as mock_call:
+            self.client.wait_stop(timeout=2.0)
+
+        mock_call.assert_called_once_with(
+            "wait_stop", timeout=7.0, wait_timeout=2.0
+        )
+
 
 class TestGDBCommandError(unittest.TestCase):
     """Test GDBCommandError class."""

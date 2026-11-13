@@ -241,6 +241,15 @@ class GDBClient:
         """获取状态"""
         return self.call("status")
 
+    def wait_stop(self, timeout: float = 30.0) -> dict:
+        """Block until the target stops (breakpoint/signal/interrupt) or timeout.
+
+        The socket timeout is deliberately longer than the server-side wait so
+        the server's clean ``{"stopped": false, "reason": "timeout"}`` arrives
+        instead of a client-side socket error.
+        """
+        return self.call("wait_stop", timeout=timeout + 5.0, wait_timeout=timeout)
+
     def ptype(self, expr: str) -> dict:
         """View type information for an expression."""
         return self.call("ptype", expr=expr)
