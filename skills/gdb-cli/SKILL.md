@@ -464,6 +464,22 @@ gdb-cli wait-stop -s $SESSION --timeout 30        # ...then wait for the hit
   outcome (exit 0), loop and re-issue it.
 - The GDB session keeps serving other commands while a wait-stop is blocked.
 
+Common traps in this area (all verified against real hardware):
+
+- **`already-stopped` with an idle-function frame is NOT a breakpoint hit.**
+  A frame in `arch_cpu_idle`/`vPortSuppressTicksAndSleep`/WFI means the
+  target was simply stopped (you `interrupt`ed — or halted — and forgot to
+  `continue&` before waiting). Before treating a stop as your breakpoint,
+  check `reason`: `"breakpoint-hit"` names the breakpoint;
+  `"already-stopped"` means the target was idle-stopped at the call. When
+  in doubt, confirm with `exec "info breakpoints"` (hit counts) and verify
+  the frame is at a breakpoint address.
+- **`jlink restart` clears ALL breakpoints** (fresh GDB; same session_id).
+  Re-set them (`hbreak ...`) after every restart before resuming.
+- **`delete breakpoints` output is easy to misread under dense operation.**
+  Always verify with `exec "info breakpoints"` afterwards (empty list = 0
+  breakpoints); delete stubborn entries by number (`delete 5`).
+
 ## Session Management
 
 ```bash
