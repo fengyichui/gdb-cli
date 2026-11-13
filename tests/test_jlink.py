@@ -1167,6 +1167,45 @@ def test_stop_all_removes_dead_instance_jsons(cli_module, jlink_dir, monkeypatch
     assert payload["removed_stale"] == ["bbbb2222"]
 
 
+def test_stop_all_with_no_instances_still_cleans_orphans(cli_module, jlink_dir, monkeypatch):
+    """No instance metadata + a live managed server: stop --all must still
+    sweep the orphan instead of erroring out with nothing stopped."""
+    _FakeClick._context = _FakeContext(invoked_subcommand="stop")
+    monkeypatch.setattr(cli_module, "list_instances", lambda: [])
+    monkeypatch.setattr(
+        cli_module, "find_orphan_servers",
+        lambda: [{"pid": 777, "cmdline": ["JLinkGDBServer", "-port", "2331"]}],
+    )
+    monkeypatch.setattr(
+        cli_module, "stop_orphan_servers",
+        lambda: {"stopped": [{"pid": 777, "status": "stopped"}], "failed": []},
+    )
+
+    with patch.object(cli_module, "print_json") as mock_print:
+        cli_module.jlink_stop(None, True)
+
+    payload = mock_print.call_args.args[0]
+    assert payload["status"] == "stopped"
+    assert payload["removed_orphans"] == [{"pid": 777, "status": "stopped"}]
+
+
+def test_stop_all_with_no_instances_and_no_orphans_errors(cli_module, jlink_dir, monkeypatch):
+    _FakeClick._context = _FakeContext(invoked_subcommand="stop")
+    monkeypatch.setattr(cli_module, "list_instances", lambda: [])
+    monkeypatch.setattr(cli_module, "find_orphan_servers", lambda: [])
+    monkeypatch.setattr(
+        cli_module, "stop_orphan_servers", lambda: {"stopped": [], "failed": []}
+    )
+
+    with patch.object(cli_module, "print_error") as mock_error:
+        with pytest.raises(cli_module.click.exceptions.Exit) as exc:
+            cli_module.jlink_stop(None, True)
+
+    assert exc.value.exit_code == 1
+    # Title is the generic stop_failed header; the raised message is details.
+    assert "No J-Link instances" in str(mock_error.call_args.args)
+
+
 def test_restart_reconnects_with_persisted_config(cli_module, jlink_dir):
     _make_instance(
         jlink_dir,
@@ -1292,4 +1331,124 @@ def test_rtos_help_lists_supported_plugins_without_internals():
     for name in ("FreeRTOS", "embOS", "Zephyr", "Azure", "ChibiOS", "NuttX"):
         assert name in text
     assert "GDBServer/RTOSPlugin_" not in text
+
+
+# ---------------------------------------------------------------------------
+# Orphan JLinkGDBServer cleanup (metadata deleted, process still alive)
+# ---------------------------------------------------------------------------
+
+def test_find_orphan_servers_matches_managed_without_metadata(jlink_dir, monkeypatch):
+    # A gdb-cli-managed JLinkGDBServer whose instance JSON is gone (orphan),
+    # an externally started server (no marker), and an unrelated process.
+    cmdlines = {
+        1234: ["JLinkGDBServer", "-nogui", "-device", "D", "-select", "usb=1", "-port", "2331"],
+        5678: ["JLinkGDBServer", "-nogui"],
+        999: ["sleep", "100"],
+    }
+    envs = {
+        1234: {"GDB_CLI_MANAGED": "1"},
+        5678: {},
+        999: {"GDB_CLI_MANAGED": "1"},
+    }
+    monkeypatch.setattr(
+        jlink, "_read_proc_cmdline", lambda p: cmdlines.get(p, None)
+    )
+    monkeypatch.setattr(
+        jlink, "_read_proc_environ", lambda p: envs.get(p, None)
+    )
+
+    orphans = jlink.find_orphan_servers(pids=[1234, 5678, 999])
+
+    assert [o["pid"] for o in orphans] == [1234]
+
+
+def test_find_orphan_servers_skips_live_instances(jlink_dir, monkeypatch):
+    # The process exists and its instance metadata exists -> not an orphan.
+    _make_instance(jlink_dir, pid=4242, start_time="111")
+    monkeypatch.setattr(jlink, "_is_instance_running", lambda inst: True)
+    monkeypatch.setattr(
+        jlink, "_read_proc_cmdline",
+        lambda p: ["JLinkGDBServer", "-port", "2331"] if p == 4242 else None,
+    )
+    monkeypatch.setattr(
+        jlink, "_read_proc_environ",
+        lambda p: {"GDB_CLI_MANAGED": "1"} if p == 4242 else None,
+    )
+
+    orphans = jlink.find_orphan_servers(pids=[4242])
+
+    assert orphans == []
+
+
+def test_stop_orphan_servers_kills_and_reports(jlink_dir, monkeypatch):
+    monkeypatch.setattr(
+        jlink, "_read_proc_cmdline",
+        lambda p: ["JLinkGDBServer", "-port", "2331"] if p == 1234 else None,
+    )
+    monkeypatch.setattr(
+        jlink, "_read_proc_environ",
+        lambda p: {"GDB_CLI_MANAGED": "1"} if p == 1234 else None,
+    )
+    killed = []
+    monkeypatch.setattr(jlink, "_signal_pid",
+                        lambda pid, sig: killed.append((pid, sig)))
+
+    def fake_wait(pid, timeout=5.0):
+        return True  # process exits after SIGTERM
+
+    monkeypatch.setattr(jlink, "_wait_process_exit", fake_wait)
+
+    result = jlink.stop_orphan_servers(pids=[1234])
+
+    assert killed == [(1234, signal.SIGTERM)]
+    assert result["stopped"] == [{"pid": 1234, "status": "stopped"}]
+    assert result["failed"] == []
+
+
+def test_stop_orphan_servers_escalates_to_kill(monkeypatch):
+    monkeypatch.setattr(
+        jlink, "_read_proc_cmdline",
+        lambda p: ["JLinkGDBServer"] if p == 1234 else None,
+    )
+    monkeypatch.setattr(
+        jlink, "_read_proc_environ",
+        lambda p: {"GDB_CLI_MANAGED": "1"} if p == 1234 else None,
+    )
+    killed = []
+    monkeypatch.setattr(
+        jlink, "_signal_pid", lambda pid, sig: killed.append((pid, sig))
+    )
+    monkeypatch.setattr(jlink, "_wait_process_exit", lambda pid, timeout=5.0: False)
+
+    result = jlink.stop_orphan_servers(pids=[1234])
+
+    assert (1234, signal.SIGTERM) in killed
+    assert (1234, signal.SIGKILL) in killed
+    assert result["stopped"] == []
+    assert [f["pid"] for f in result["failed"]] == [1234]
+
+
+def test_stop_all_reports_removed_orphans(cli_module, jlink_dir, monkeypatch):
+    _FakeClick._context = _FakeContext(invoked_subcommand="stop")
+    instances = [_make_instance(jlink_dir)]
+    monkeypatch.setattr(cli_module, "list_instances", lambda: instances)
+    monkeypatch.setattr(
+        cli_module, "stop_instance",
+        lambda i: {"jlink_id": i, "status": "stopped"},
+    )
+    monkeypatch.setattr(
+        cli_module, "find_orphan_servers",
+        lambda: [{"pid": 777, "cmdline": ["JLinkGDBServer", "-port", "2331"]}],
+    )
+    monkeypatch.setattr(
+        cli_module, "stop_orphan_servers",
+        lambda: {"stopped": [{"pid": 777, "status": "stopped"}], "failed": []},
+    )
+    monkeypatch.setattr(cli_module, "_stop_associated_session", lambda inst: [])
+
+    with patch.object(cli_module, "print_json") as mock_print:
+        cli_module.jlink_stop(None, True)
+
+    payload = mock_print.call_args.args[0]
+    assert payload["removed_orphans"] == [{"pid": 777, "status": "stopped"}]
 

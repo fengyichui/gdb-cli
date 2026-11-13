@@ -34,10 +34,12 @@ from .jlink import (
     delete_instance_metadata,
     enumerate_usb_devices,
     find_free_port,
+    find_orphan_servers,
     get_instance,
     list_instances,
     start_gdbserver,
     stop_instance,
+    stop_orphan_servers,
     validate_select,
 )
 from .launcher import GDBLauncherError, launch_attach, launch_core, launch_target
@@ -1366,7 +1368,16 @@ def jlink_stop(jlink_id: Optional[str], all_instances: bool) -> None:
     try:
         if all_instances:
             instances = list_instances()
-            if not instances:
+
+            # Sweep gdb-cli-managed servers whose metadata is gone (orphaned
+            # by an external wipe of ~/.gdb-cli/jlink/).  Externally started
+            # servers carry no marker and are never touched.  Runs BEFORE the
+            # no-instances check so a metadata wipe never strands the process.
+            orphan_result = stop_orphan_servers()
+            removed_orphans = orphan_result["stopped"]
+            orphan_failures = orphan_result["failed"]
+
+            if not instances and not removed_orphans and not orphan_failures:
                 raise JLinkManagerError(t("cli.jlink.no_instances"))
 
             results = []
@@ -1388,16 +1399,25 @@ def jlink_stop(jlink_id: Optional[str], all_instances: bool) -> None:
                 result for result in results
                 if result.get("status") == "stop_failed"
             ]
+            failed = failed + [
+                {"pid": entry["pid"], "status": "stop_failed"}
+                for entry in orphan_failures
+            ]
             if failed:
                 print_error(
                     t("cli.jlink.stop_failed"),
-                    json.dumps({"failed": failed, "removed_stale": removed_stale}),
+                    json.dumps({
+                        "failed": failed,
+                        "removed_stale": removed_stale,
+                        "removed_orphans": removed_orphans,
+                    }),
                 )
                 raise click.exceptions.Exit(1)
 
             print_json({
                 "stopped": results,
                 "removed_stale": removed_stale,
+                "removed_orphans": removed_orphans,
                 "count": len(results),
                 "status": "stopped",
             })
@@ -1528,7 +1548,14 @@ def jlink_status(jlink_id: Optional[str]) -> None:
             "session_id": instance.session_id,
         })
 
-    print_json({"instances": entries, "count": len(entries)})
+    # Orphans: managed servers with no metadata left.  Reported only; removed
+    # by `jlink stop --all`.
+    orphans = find_orphan_servers()
+    print_json({
+        "instances": entries,
+        "count": len(entries),
+        "orphans": orphans,
+    })
 
 
 @jlink.command("devices", help=t("cli.jlink.devices.doc"))

@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.5.0] - 2026-11-10
 
 ### Added
+- `gdb-cli jlink status` now reports `orphans` (gdb-cli-managed
+  JLinkGDBServer processes whose metadata was lost, e.g. by an external
+  wipe of `~/.gdb-cli/jlink/`), and `jlink stop --all` sweeps and stops
+  them (`removed_orphans` in the output) instead of erroring out with
+  "No J-Link instances" while the process keeps holding the probe.
+  Externally started servers carry no gdb-cli marker and are never
+  signalled.
 - `gdb-cli wait-stop -s <session> [--timeout N]`: long-poll stop
   notification. Blocks until the target stops (breakpoint, watchpoint,
   signal, or `interrupt`) and returns the stop location with ~60ms latency,

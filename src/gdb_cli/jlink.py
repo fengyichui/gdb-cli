@@ -354,6 +354,101 @@ def delete_instance_log(log_path: str) -> None:
         pass
 
 
+# Marker injected into every JLinkGDBServer we spawn, so orphan cleanup can
+# tell our processes from externally started servers (which we never touch).
+_MANAGED_ENV_MARKER = "GDB_CLI_MANAGED"
+
+
+def _read_proc_cmdline(pid: int) -> Optional[List[str]]:
+    """Return the argv of ``pid`` split on NUL, or None when unreadable."""
+    try:
+        with open(f"/proc/{pid}/cmdline", "rb") as f:
+            raw = f.read()
+    except OSError:
+        return None
+    if not raw:
+        return None
+    return [part.decode("utf-8", "replace") for part in raw.split(b"\0") if part]
+
+
+def _read_proc_environ(pid: int) -> Optional[dict]:
+    """Return the environment of ``pid`` as a dict, or None when unreadable."""
+    try:
+        with open(f"/proc/{pid}/environ", "rb") as f:
+            raw = f.read()
+    except OSError:
+        return None
+    env = {}
+    for entry in raw.split(b"\0"):
+        if not entry:
+            continue
+        key, sep, value = entry.partition(b"=")
+        if sep:
+            env[key.decode("utf-8", "replace")] = value.decode("utf-8", "replace")
+    return env
+
+
+def _iter_pids() -> List[int]:
+    try:
+        return [int(entry.name) for entry in Path("/proc").iterdir()
+                if entry.name.isdigit()]
+    except OSError:
+        return []
+
+
+def find_orphan_servers(pids: Optional[List[int]] = None) -> List[dict]:
+    """Find gdb-cli-managed JLinkGDBServer processes with no instance metadata.
+
+    An orphan arises when the instance JSON is deleted while the server
+    process survives (observed: another tool wiped ~/.gdb-cli/jlink/).  Only
+    processes carrying the ``GDB_CLI_MANAGED`` marker are considered; servers
+    started outside gdb-cli are never reported or signalled.
+    """
+    known_pids = {
+        instance.pid for instance in list_instances() if instance.pid is not None
+    }
+    orphans = []
+    for pid in (_iter_pids() if pids is None else pids):
+        if pid in known_pids:
+            continue
+        cmdline = _read_proc_cmdline(pid)
+        if not cmdline or not any("JLinkGDBServer" in part for part in cmdline):
+            continue
+        env = _read_proc_environ(pid)
+        if not env or env.get(_MANAGED_ENV_MARKER) != "1":
+            continue
+        orphans.append({"pid": pid, "cmdline": cmdline})
+    return orphans
+
+
+def _signal_pid(pid: int, sig: int) -> None:
+    os.kill(pid, sig)
+
+
+def stop_orphan_servers(pids: Optional[List[int]] = None) -> dict:
+    """Stop every orphan found by :func:`find_orphan_servers`.
+
+    Escalates SIGTERM -> SIGKILL per process (same discipline as
+    ``stop_instance``).  Returns ``{"stopped": [...], "failed": [...]}``.
+    """
+    stopped, failed = [], []
+    for orphan in find_orphan_servers(pids=pids):
+        pid = orphan["pid"]
+        dead = False
+        for sig in (signal.SIGTERM, signal.SIGKILL):
+            try:
+                _signal_pid(pid, sig)
+            except OSError:
+                dead = True  # already gone
+                break
+            if _wait_process_exit(pid, timeout=5.0):
+                dead = True
+                break
+        entry = {"pid": pid, "status": "stopped" if dead else "stop_failed"}
+        (stopped if dead else failed).append(entry)
+    return {"stopped": stopped, "failed": failed}
+
+
 def _is_instance_running(instance: JLinkInstance) -> bool:
     """Return True when the persisted PID still identifies our process."""
     if instance.pid is None or instance.start_time is None:
@@ -415,12 +510,18 @@ def start_gdbserver(
     if log_file_path.parent:
         log_file_path.parent.mkdir(parents=True, exist_ok=True)
 
+    spawn_env = os.environ.copy()
+    # Marks the process as gdb-cli-managed so orphan cleanup (metadata lost)
+    # can safely find it later; externally started servers carry no marker.
+    spawn_env[_MANAGED_ENV_MARKER] = "1"
+
     with open(log_path, "ab") as log_file:
         process = subprocess.Popen(
             cmdline,
             stdout=log_file,
             stderr=subprocess.STDOUT,
             start_new_session=True,
+            env=spawn_env,
         )
 
     deadline = time.monotonic() + wait_timeout
