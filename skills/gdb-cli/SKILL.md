@@ -154,9 +154,10 @@ Cortex-M); `eval` does not auto-dereference pointers by default
 (MMIO-safe) — use `eval --deref` to opt in. Prefer native GDB commands
 over the J-Link monitor channel: run/resume with `continue&` (async)
 and stop the target with `interrupt` (the remote equivalent of Ctrl-C);
-read registers with `gdb-cli registers` or
-`exec "info registers <names>"`. Set breakpoints with `hbreak`
-(hardware breakpoints, never patch flash) — see
+NEVER use `monitor halt`/`monitor go` — they desynchronize GDB from the
+target (see "Breakpoints and Target Control"). Read registers with
+`gdb-cli registers` or `exec "info registers <names>"`. Set breakpoints
+with `hbreak` (hardware breakpoints, never patch flash) — see
 "Breakpoints and Target Control" below. The one monitor command worth
 keeping is reset: `gdb-cli exec -s $SESSION "monitor reset"` — optionally
 with a type argument: `monitor reset 0` = NORMAL (core+peripherals via
@@ -426,11 +427,16 @@ gdb-cli exec -s $SESSION "delete N" / "disable N" / "enable N"
 gdb-cli exec -s $SESSION "hbreak vPortSuppressTicksAndSleep if xExpectedIdleTime > 100"
 ```
 
-Run, stop, and reset the target:
+Run, stop, and reset the target. NEVER use `monitor halt` or `monitor go`:
+they desynchronize GDB from the target — GDB still believes the target is
+in its last known state, so subsequent commands hang or report stale
+frames. Halt the target with `interrupt` (the remote equivalent of
+Ctrl-C) and resume it with `continue&` (asynchronous), which keep GDB's
+view consistent:
 
 ```bash
-gdb-cli exec -s $SESSION "continue&"          # resume asynchronously
-gdb-cli exec -s $SESSION "interrupt"          # stop (remote Ctrl-C)
+gdb-cli exec -s $SESSION "continue&"          # resume asynchronously (NOT monitor go)
+gdb-cli exec -s $SESSION "interrupt"          # stop (remote Ctrl-C, NOT monitor halt)
 gdb-cli exec -s $SESSION "monitor reset"      # reset + halt (type 0, default)
 gdb-cli exec -s $SESSION "monitor reset 1"   # core only, peripherals keep state
 gdb-cli exec -s $SESSION "monitor reset 2"   # via RESET pin (drops the debug link)
