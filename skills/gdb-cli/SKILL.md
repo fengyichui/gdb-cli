@@ -155,9 +155,11 @@ Cortex-M); `eval` does not auto-dereference pointers by default
 over the J-Link monitor channel: run/resume with `continue&` (async)
 and stop the target with `interrupt` (the remote equivalent of Ctrl-C);
 read registers with `gdb-cli registers` or
-`exec "info registers <names>"`. The one monitor command worth keeping
-is reset: `gdb-cli exec -s $SESSION "monitor reset"` — optionally with a
-type argument: `monitor reset 0` = NORMAL (core+peripherals via
+`exec "info registers <names>"`. Set breakpoints with `hbreak`
+(hardware breakpoints, never patch flash) — see
+"Breakpoints and Target Control" below. The one monitor command worth
+keeping is reset: `gdb-cli exec -s $SESSION "monitor reset"` — optionally
+with a type argument: `monitor reset 0` = NORMAL (core+peripherals via
 SYSRESETREQ/VECTRESET, default), `monitor reset 1` = CORE only
 (peripherals keep state), `monitor reset 2` = RESET pin (core+
 peripherals via the reset pin).
@@ -409,36 +411,49 @@ gdb-cli disasm -s $SESSION --count 12                    # faulting instruction
 gdb-cli eval -s $SESSION "SCB->CFSR"                     # with CMSIS headers
 ```
 
-Reset the target when needed:
+## Breakpoints and Target Control
+
+Set breakpoints with `hbreak` (hardware breakpoints) on embedded targets —
+they use the Cortex-M FPB comparators and never patch flash memory. Plain
+`break` writes a BKPT into flash, which fails on flash-ro regions and wears
+flash when reused. Hardware breakpoint slots are limited (typically 6-8 on
+Cortex-M); `tbreak`/`hbreak ... if <cond>` (one-shot, conditional) work too.
 
 ```bash
-gdb-cli exec -s $SESSION "monitor reset"      # reset + halt (type 0, default)
-gdb-cli exec -s $SESSION "monitor reset 1"    # core only, peripherals keep state
-gdb-cli exec -s $SESSION "monitor reset 2"    # via RESET pin (core + peripherals)
+gdb-cli exec -s $SESSION "hbreak <function|file:line|*0xADDR>"   # embedded: always hbreak
+gdb-cli exec -s $SESSION "info breakpoints"                      # list + hit counts
+gdb-cli exec -s $SESSION "delete N" / "disable N" / "enable N"
+gdb-cli exec -s $SESSION "hbreak vPortSuppressTicksAndSleep if xExpectedIdleTime > 100"
 ```
 
-Run and stop the target with native GDB commands:
+Run, stop, and reset the target:
 
 ```bash
 gdb-cli exec -s $SESSION "continue&"          # resume asynchronously
 gdb-cli exec -s $SESSION "interrupt"          # stop (remote Ctrl-C)
+gdb-cli exec -s $SESSION "monitor reset"      # reset + halt (type 0, default)
+gdb-cli exec -s $SESSION "monitor reset 1"   # core only, peripherals keep state
+gdb-cli exec -s $SESSION "monitor reset 2"   # via RESET pin (drops the debug link)
 ```
 
 Wait for the target to stop (breakpoint hit, signal, or manual interrupt)
 with `wait-stop` instead of polling `threads`:
 
 ```bash
-gdb-cli wait-stop -s $SESSION --timeout 30
+gdb-cli exec -s $SESSION "hbreak arch_cpu_idle"   # set the breakpoint...
+gdb-cli exec -s $SESSION "continue&"              # ...resume...
+gdb-cli wait-stop -s $SESSION --timeout 30        # ...then wait for the hit
 ```
 
 - Blocks until the stop, then returns the location: `{"stopped": true,
   "reason": "breakpoint-hit"|"signal"|"stopped"|"already-stopped", ...,
   "frame": {"function","file","line","address"}}`. Re-issue after each stop
   (long-poll: zero traffic while waiting, ~60ms notification latency).
-- A stop that happened BEFORE the call is NOT lost: the target already
-  being stopped returns immediately with `reason: "already-stopped"` and the
-  current frame; an exited target returns `{"stopped": false, "reason":
-  "exited"}`. No gap between a hit and the wait.
+- If the target is ALREADY stopped when you call it — e.g. the breakpoint
+  hit before wait-stop was issued — it returns immediately with
+  `reason: "already-stopped"` and the current frame; the event is never
+  lost by calling too late. An exited target returns `{"stopped": false,
+  "reason": "exited"}`.
 - `--timeout N` returns `{"stopped": false, "reason": "timeout"}` — a normal
   outcome (exit 0), loop and re-issue it.
 - The GDB session keeps serving other commands while a wait-stop is blocked.
